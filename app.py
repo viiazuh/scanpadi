@@ -153,10 +153,10 @@ model = load_ai_model()
 MODEL_LABELS = ["Blas", "Hawar Daun", "Tungro", "Sehat"]
 
 DISEASE_KB = {
-    "Blas": {"title": "Penyakit Blas", "cause": "Jamur Pyricularia oryzae", "prevention": ["Varietas tahan", "Kurangi Nitrogen"], "treatment": ["Fungisida Tricyclazole"], "color": "#FFEBEE"}, # Merah muda banget
-    "Hawar Daun": {"title": "Hawar Daun (Kresek)", "cause": "Bakteri Xanthomonas", "prevention": ["Atur air", "Kurangi Urea"], "treatment": ["Bakterisida tembaga"], "color": "#FFF3E0"}, # Oranye muda
+    "Blas": {"title": "Penyakit Blas", "cause": "Jamur Pyricularia oryzae", "prevention": ["Varietas tahan", "Kurangi Nitrogen"], "treatment": ["Fungisida Tricyclazole"], "color": "#FFEBEE"},
+    "Hawar Daun": {"title": "Hawar Daun (Kresek)", "cause": "Bakteri Xanthomonas", "prevention": ["Atur air", "Kurangi Urea"], "treatment": ["Bakterisida tembaga"], "color": "#FFF3E0"},
     "Tungro": {"title": "Penyakit Tungro", "cause": "Virus Wereng Hijau", "prevention": ["Tanam serempak"], "treatment": ["Insektisida sistemik"], "color": "#FFEBEE"},
-    "Sehat": {"title": "Tanaman Sehat", "cause": "Kondisi Optimal", "prevention": ["Rawat rutin"], "treatment": ["-"], "color": "#E8F5E9"}, # Hijau muda
+    "Sehat": {"title": "Tanaman Sehat", "cause": "Kondisi Optimal", "prevention": ["Rawat rutin"], "treatment": ["-"], "color": "#E8F5E9"},
     "Brown Spot": {"title": "Bercak Coklat", "cause": "Jamur Helminthosporium", "prevention": ["Pupuk Kalium"], "treatment": ["Fungisida"], "color": "#EFEBE9"},
     "Rice Hispa": {"title": "Hama Putih Palsu", "cause": "Kumbang Hispa", "prevention": ["Pangkas daun"], "treatment": ["Insektisida"], "color": "#F5F5F5"}
 }
@@ -193,9 +193,8 @@ with st.sidebar:
 
 # ================== HALAMAN ==================
 def home_page():
-    # Header Banner Sederhana
+    # Header Banner Sederhana (Tulisan di bawah judul sudah dihapus)
     st.markdown("<h1 style='text-align: center; color: #2E7D32;'>🌾 Dashboard Scan Padi</h1>", unsafe_allow_html=True)
-    st.markdown("<p style='text-align: center; color: #555;'>Deteksi dini penyakit padi menggunakan Artificial Intelligence</p>", unsafe_allow_html=True)
     st.divider()
 
     col1, col2 = st.columns([3,1])
@@ -266,7 +265,6 @@ def result_page():
     with col_stat:
         st.markdown(f"### {info['title']}")
         
-        # Indikator Confidence
         if r['confidence'] > 80:
             st.success(f"✅ Tingkat Keyakinan: **{r['confidence']}%** (Sangat Yakin)")
         else:
