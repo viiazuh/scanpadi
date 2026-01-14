@@ -7,10 +7,11 @@ import numpy as np
 from PIL import Image
 from datetime import datetime
 
-# ================== IMPORT TENSORFLOW (Versi 2.13.0 Aman) ==================
+# ================== IMPORT TENSORFLOW ==================
 import tensorflow as tf
 from tensorflow.keras.models import load_model
 from tensorflow.keras.preprocessing.image import img_to_array
+from tensorflow.keras.layers import InputLayer # Kita butuh ini untuk perbaikan
 
 # ================== KONFIGURASI HALAMAN ==================
 st.set_page_config(
@@ -19,13 +20,24 @@ st.set_page_config(
     initial_sidebar_state="collapsed"
 )
 
+# ================== OBAT ERROR "batch_shape" ==================
+# Class ini berfungsi membuang argumen 'batch_shape' yang bikin error di TF 2.13
+class FixedInputLayer(InputLayer):
+    def __init__(self, *args, **kwargs):
+        # Buang argumen yang tidak dikenali TF versi lama
+        if "batch_shape" in kwargs:
+            kwargs.pop("batch_shape")
+        if "dtype" in kwargs:
+            kwargs.pop("dtype")
+        super().__init__(*args, **kwargs)
+
 # ================== LOAD MODEL ==================
 @st.cache_resource
 def load_ai_model():
     with st.spinner("⏳ Memuat model AI..."):
         try:
-            # Di TF 2.13.0, load_model sangat stabil untuk .h5
-            model = load_model("best_model.h5", compile=False)
+            # Kita panggil model dengan menyuntikkan FixedInputLayer
+            model = load_model("best_model.h5", compile=False, custom_objects={'InputLayer': FixedInputLayer})
             return model
         except Exception as e:
             st.error(f"Gagal memuat model: {e}")
@@ -33,40 +45,40 @@ def load_ai_model():
 
 model = load_ai_model()
 
-# ================== DATABASE DATABASE ==================
+# ================== DATABASE LABELS & INFO ==================
 MODEL_LABELS = ["Blas", "Hawar Daun", "Tungro", "Sehat"]
 
 DISEASE_KB = {
     # --- DETEKSI AI AKTIF ---
     "Blas": {
         "title": "Penyakit Blas (Leaf Blast)",
-        "cause": "Jamur Pyricularia oryzae. Bercak berbentuk belah ketupat.",
+        "cause": "Jamur Pyricularia oryzae. Bercak belah ketupat.",
         "prevention": ["Gunakan varietas tahan", "Hindari pupuk N berlebih"],
-        "treatment": ["Fungisida Tricyclazole", "Bakar jerami sisa"],
+        "treatment": ["Fungisida Tricyclazole", "Bakar jerami"],
         "color": "red"
     },
     "Hawar Daun": {
-        "title": "Hawar Daun Bakteri (Bacterial Leaf Blight)",
-        "cause": "Bakteri Xanthomonas oryzae. Daun mengering dari ujung (kresek).",
+        "title": "Hawar Daun Bakteri (Kresek)",
+        "cause": "Bakteri Xanthomonas oryzae.",
         "prevention": ["Atur pengairan", "Kurangi Urea"],
-        "treatment": ["Bakterisida tembaga", "Keringkan sawah berkala"],
+        "treatment": ["Bakterisida tembaga", "Keringkan sawah"],
         "color": "orange"
     },
     "Tungro": {
         "title": "Penyakit Tungro",
-        "cause": "Virus dari wereng hijau. Tanaman kerdil dan kuning.",
-        "prevention": ["Tanam serempak", "Kendalikan wereng hijau"],
+        "cause": "Virus dari wereng hijau.",
+        "prevention": ["Tanam serempak", "Kendalikan wereng"],
         "treatment": ["Cabut tanaman sakit", "Insektisida sistemik"],
         "color": "red"
     },
     "Sehat": {
-        "title": "Tanaman Sehat (Healthy)",
+        "title": "Tanaman Sehat",
         "cause": "Kondisi optimal.",
-        "prevention": ["Lanjutkan perawatan rutin"],
+        "prevention": ["Perawatan rutin"],
         "treatment": ["-"],
         "color": "green"
     },
-    # --- DUMMY DATA ---
+    # --- DUMMY DATA (Untuk Simulasi) ---
     "Brown Spot": {
         "title": "Bercak Coklat (Brown Spot)",
         "cause": "Jamur Helminthosporium oryzae.",
@@ -80,17 +92,22 @@ DISEASE_KB = {
         "prevention": ["Pangkas daun bertelur"],
         "treatment": ["Insektisida Klorpirifos"],
         "color": "gray"
+    },
+    "Sheath Blight": {
+        "title": "Hawar Pelepah",
+        "cause": "Jamur Rhizoctonia solani.",
+        "prevention": ["Jarak tanam legowo"],
+        "treatment": ["Fungisida Validamycin"],
+        "color": "orange"
     }
 }
 
 # ================== FUNGSI PREDIKSI ==================
 def predict_image(image):
-    if model is None:
-        return None
+    if model is None: return None
     
     # Preprocess
-    if image.mode != "RGB":
-        image = image.convert("RGB")
+    if image.mode != "RGB": image = image.convert("RGB")
     img = image.resize((224, 224))
     x = img_to_array(img)
     x = np.expand_dims(x, axis=0)
@@ -118,11 +135,12 @@ if "page" not in st.session_state: st.session_state.page = "home"
 if "history" not in st.session_state: st.session_state.history = []
 if "result" not in st.session_state: st.session_state.result = None
 
-# ================== SIDEBAR ==================
+# ================== SIDEBAR (MODE SIMULASI) ==================
 with st.sidebar:
     st.header("🛠 Mode Developer")
-    st.info("Simulasi data untuk presentasi.")
-    sim_disease = st.selectbox("Pilih Penyakit", list(DISEASE_KB.keys()))
+    st.info("Gunakan ini jika model AI belum mengenali penyakit tertentu.")
+    sim_disease = st.selectbox("Pilih Penyakit (Simulasi)", list(DISEASE_KB.keys()))
+    
     if st.button("Tampilkan Info Dummy"):
         st.session_state.result = {
             "hasil": sim_disease,
@@ -168,16 +186,18 @@ def scan_page():
     
     if image:
         st.image(image, caption="Preview", use_column_width=True)
+        # Tombol Scan
         if st.button("🔍 Analisis AI", use_container_width=True):
             if model is None:
-                st.error("Model gagal dimuat. Cek logs.")
+                st.error("Model gagal dimuat. Gunakan Mode Developer di sidebar.")
             else:
                 with st.spinner("Menganalisis..."):
                     res = predict_image(image)
-                    res["image"] = image
-                    st.session_state.result = res
-                    st.session_state.page = "result"
-                    st.rerun()
+                    if res:
+                        res["image"] = image
+                        st.session_state.result = res
+                        st.session_state.page = "result"
+                        st.rerun()
     
     if st.button("⬅ Kembali"): st.session_state.page = "home"
 
@@ -192,7 +212,13 @@ def result_page():
     
     st.image(r["image"], use_column_width=True)
     st.markdown(f"## {info['title']}")
-    st.success(f"Confidence: {r['confidence']}%")
+    
+    # Warna badge
+    if r['confidence'] > 80:
+        st.success(f"Confidence: {r['confidence']}%")
+    else:
+        st.warning(f"Confidence: {r['confidence']}%")
+        
     st.info(f"Penyebab: {info['cause']}")
     
     c1, c2 = st.columns(2)
