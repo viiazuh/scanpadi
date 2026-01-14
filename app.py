@@ -7,6 +7,7 @@ import numpy as np
 from PIL import Image
 from datetime import datetime
 import json
+import requests
 
 # ================== IMPORT TENSORFLOW ==================
 import tensorflow as tf
@@ -19,27 +20,38 @@ st.set_page_config(
     initial_sidebar_state="collapsed"
 )
 
+# ================== DOWNLOAD MODEL OTOMATIS ==================
+def download_model_from_github():
+    url = "https://raw.githubusercontent.com/viiazuh/viiazuh/main/best_model.h5"
+    local_path = "best_model.h5"
+    if not os.path.exists(local_path):
+        st.info("Mengunduh model dari GitHub...")
+        r = requests.get(url, allow_redirects=True)
+        with open(local_path, "wb") as f:
+            f.write(r.content)
+        st.success("Model berhasil diunduh!")
+
+# Panggil download sebelum load model
+download_model_from_github()
+
 # ================== DEBUGGING (Cari File) ==================
 def find_model_file():
-    # Cek folder saat ini
     if os.path.exists("best_model.h5"): 
         return os.path.abspath("best_model.h5")
-    # Cek folder aplikasi
     app_dir = os.path.dirname(os.path.realpath(__file__))
     file_path = os.path.join(app_dir, "best_model.h5")
     if os.path.exists(file_path): 
         return file_path
     return None
 
-# ================== SMART LOADER ==================
+# ================== LOAD MODEL ==================
 @st.cache_resource
 def load_ai_model():
     model_path = find_model_file()
     if not model_path:
-        st.error("❌ File 'best_model.h5' belum terdeteksi. Upload dulu ke folder proyek!")
+        st.error("❌ File 'best_model.h5' belum terdeteksi.")
         return None
     try:
-        # Langsung load model (arsitektur + bobot)
         model = tf.keras.models.load_model(model_path, compile=False)
         st.sidebar.success(f"Model berhasil dimuat: {os.path.basename(model_path)}")
         return model
