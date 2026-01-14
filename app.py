@@ -7,11 +7,15 @@ import numpy as np
 from PIL import Image
 from datetime import datetime
 
-# ================== IMPORT TENSORFLOW ==================
+# ================== IMPORT TENSORFLOW (Versi Robust) ==================
+# Kita import tensorflow sebagai tf agar tidak kena error "ModuleNotFoundError"
 import tensorflow as tf
-from tensorflow.keras.models import load_model
-from tensorflow.keras.preprocessing.image import img_to_array
-from tensorflow.keras.layers import InputLayer # Kita butuh ini untuk perbaikan
+
+# Definisi shortcut agar code lebih pendek
+models = tf.keras.models
+layers = tf.keras.layers
+utils = tf.keras.utils
+preprocessing = tf.keras.preprocessing
 
 # ================== KONFIGURASI HALAMAN ==================
 st.set_page_config(
@@ -21,8 +25,7 @@ st.set_page_config(
 )
 
 # ================== OBAT ERROR "batch_shape" ==================
-# Class ini berfungsi membuang argumen 'batch_shape' yang bikin error di TF 2.13
-class FixedInputLayer(InputLayer):
+class FixedInputLayer(layers.InputLayer):
     def __init__(self, *args, **kwargs):
         # Buang argumen yang tidak dikenali TF versi lama
         if "batch_shape" in kwargs:
@@ -31,54 +34,67 @@ class FixedInputLayer(InputLayer):
             kwargs.pop("dtype")
         super().__init__(*args, **kwargs)
 
-# ================== LOAD MODEL ==================
+# ================== LOAD MODEL (DENGAN PATH OTOMATIS) ==================
 @st.cache_resource
 def load_ai_model():
     with st.spinner("⏳ Memuat model AI..."):
         try:
-            # Kita panggil model dengan menyuntikkan FixedInputLayer
-            model = load_model("best_model.h5", compile=False, custom_objects={'InputLayer': FixedInputLayer})
+            # 1. CARI LOKASI FILE SECARA ABSOLUT
+            # Ini mencari folder tempat app.py berada
+            dir_path = os.path.dirname(os.path.realpath(__file__))
+            file_path = os.path.join(dir_path, "best_model.h5")
+
+            # 2. CEK APAKAH FILE ADA?
+            if not os.path.exists(file_path):
+                st.error(f"❌ File model tidak ditemukan!")
+                st.warning(f"Sistem mencari di: `{file_path}`")
+                st.info("Pastikan file 'best_model.h5' sudah di-upload ke GitHub sejajar dengan app.py")
+                return None
+
+            # 3. LOAD MODEL
+            model = models.load_model(file_path, compile=False, custom_objects={'InputLayer': FixedInputLayer})
             return model
+
         except Exception as e:
             st.error(f"Gagal memuat model: {e}")
             return None
 
 model = load_ai_model()
 
-# ================== DATABASE LABELS & INFO ==================
+# ================== DATABASE INFO ==================
 MODEL_LABELS = ["Blas", "Hawar Daun", "Tungro", "Sehat"]
 
 DISEASE_KB = {
     # --- DETEKSI AI AKTIF ---
     "Blas": {
         "title": "Penyakit Blas (Leaf Blast)",
-        "cause": "Jamur Pyricularia oryzae. Bercak belah ketupat.",
+        "cause": "Jamur Pyricularia oryzae.",
         "prevention": ["Gunakan varietas tahan", "Hindari pupuk N berlebih"],
-        "treatment": ["Fungisida Tricyclazole", "Bakar jerami"],
+        "treatment": ["Fungisida Tricyclazole", "Bakar jerami sisa"],
         "color": "red"
     },
     "Hawar Daun": {
         "title": "Hawar Daun Bakteri (Kresek)",
         "cause": "Bakteri Xanthomonas oryzae.",
         "prevention": ["Atur pengairan", "Kurangi Urea"],
-        "treatment": ["Bakterisida tembaga", "Keringkan sawah"],
+        "treatment": ["Bakterisida tembaga", "Keringkan sawah berkala"],
         "color": "orange"
     },
     "Tungro": {
         "title": "Penyakit Tungro",
         "cause": "Virus dari wereng hijau.",
-        "prevention": ["Tanam serempak", "Kendalikan wereng"],
+        "prevention": ["Tanam serempak", "Kendalikan wereng hijau"],
         "treatment": ["Cabut tanaman sakit", "Insektisida sistemik"],
         "color": "red"
     },
     "Sehat": {
         "title": "Tanaman Sehat",
         "cause": "Kondisi optimal.",
-        "prevention": ["Perawatan rutin"],
+        "prevention": ["Lanjutkan perawatan rutin"],
         "treatment": ["-"],
         "color": "green"
     },
-    # --- DUMMY DATA (Untuk Simulasi) ---
+    # --- DUMMY DATA ---
     "Brown Spot": {
         "title": "Bercak Coklat (Brown Spot)",
         "cause": "Jamur Helminthosporium oryzae.",
@@ -92,13 +108,6 @@ DISEASE_KB = {
         "prevention": ["Pangkas daun bertelur"],
         "treatment": ["Insektisida Klorpirifos"],
         "color": "gray"
-    },
-    "Sheath Blight": {
-        "title": "Hawar Pelepah",
-        "cause": "Jamur Rhizoctonia solani.",
-        "prevention": ["Jarak tanam legowo"],
-        "treatment": ["Fungisida Validamycin"],
-        "color": "orange"
     }
 }
 
@@ -109,7 +118,13 @@ def predict_image(image):
     # Preprocess
     if image.mode != "RGB": image = image.convert("RGB")
     img = image.resize((224, 224))
-    x = img_to_array(img)
+    
+    # Cara aman convert ke array (support berbagai versi TF)
+    try:
+        x = utils.img_to_array(img)
+    except AttributeError:
+        x = preprocessing.image.img_to_array(img)
+
     x = np.expand_dims(x, axis=0)
     x = x / 255.0
     
@@ -118,7 +133,6 @@ def predict_image(image):
     idx = np.argmax(pred[0])
     confidence = float(np.max(pred[0])) * 100
     
-    # Mapping label
     if idx < len(MODEL_LABELS):
         label = MODEL_LABELS[idx]
     else:
@@ -135,12 +149,11 @@ if "page" not in st.session_state: st.session_state.page = "home"
 if "history" not in st.session_state: st.session_state.history = []
 if "result" not in st.session_state: st.session_state.result = None
 
-# ================== SIDEBAR (MODE SIMULASI) ==================
+# ================== SIDEBAR ==================
 with st.sidebar:
     st.header("🛠 Mode Developer")
-    st.info("Gunakan ini jika model AI belum mengenali penyakit tertentu.")
-    sim_disease = st.selectbox("Pilih Penyakit (Simulasi)", list(DISEASE_KB.keys()))
-    
+    st.info("Simulasi data jika model belum siap.")
+    sim_disease = st.selectbox("Pilih Penyakit", list(DISEASE_KB.keys()))
     if st.button("Tampilkan Info Dummy"):
         st.session_state.result = {
             "hasil": sim_disease,
@@ -186,10 +199,9 @@ def scan_page():
     
     if image:
         st.image(image, caption="Preview", use_column_width=True)
-        # Tombol Scan
         if st.button("🔍 Analisis AI", use_container_width=True):
             if model is None:
-                st.error("Model gagal dimuat. Gunakan Mode Developer di sidebar.")
+                st.error("Model gagal dimuat. Gunakan Mode Developer.")
             else:
                 with st.spinner("Menganalisis..."):
                     res = predict_image(image)
@@ -212,13 +224,7 @@ def result_page():
     
     st.image(r["image"], use_column_width=True)
     st.markdown(f"## {info['title']}")
-    
-    # Warna badge
-    if r['confidence'] > 80:
-        st.success(f"Confidence: {r['confidence']}%")
-    else:
-        st.warning(f"Confidence: {r['confidence']}%")
-        
+    st.success(f"Confidence: {r['confidence']}%")
     st.info(f"Penyebab: {info['cause']}")
     
     c1, c2 = st.columns(2)
