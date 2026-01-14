@@ -22,77 +22,68 @@ st.set_page_config(
     initial_sidebar_state="collapsed"
 )
 
-# ================== DEBUGGING AREA (Cari File) ==================
-# Fungsi ini akan mencari file .h5 di seluruh folder
+# ================== DEBUGGING (Cari File) ==================
 def find_model_file():
-    current_dir = os.getcwd()
-    # Cek di folder sekarang
-    if os.path.exists("best_model.h5"):
-        return os.path.abspath("best_model.h5")
-    
-    # Cek sejajar dengan app.py
+    # Cek folder saat ini
+    if os.path.exists("best_model.h5"): return os.path.abspath("best_model.h5")
+    # Cek folder aplikasi
     app_dir = os.path.dirname(os.path.realpath(__file__))
     file_path = os.path.join(app_dir, "best_model.h5")
-    if os.path.exists(file_path):
-        return file_path
-        
-    # Kalau tidak ketemu, cari recursive (darurat)
-    for root, dirs, files in os.walk(current_dir):
-        for file in files:
-            if file == "best_model.h5":
-                return os.path.join(root, file)
+    if os.path.exists(file_path): return file_path
     return None
 
-# ================== SMART LOADER (Pembersih Config Keras 3) ==================
+# ================== SMART LOADER (Pembersih Agresif) ==================
 def clean_config(config):
+    """
+    Membersihkan konfigurasi Keras 3 agar kompatibel dengan TF 2.13
+    """
     if isinstance(config, dict):
-        if 'batch_shape' in config: del config['batch_shape']
-        if 'dtype' in config:
-            if isinstance(config['dtype'], dict): config['dtype'] = 'float32'
-        for key in ['time_major', 'ragged', 'name']:
-            if key in config and key == 'name' and config[key] == 'input_layer': pass # Keep name if needed
-            elif key in ['time_major', 'ragged']: del config[key]
-        for key, value in config.items(): clean_config(value)
+        # 1. Daftar "Racun" Keras 3 yang harus dibuang
+        keys_to_remove = ['time_major', 'ragged', 'batch_shape', 'batch_input_shape']
+        
+        for key in keys_to_remove:
+            if key in config:
+                del config[key]
+        
+        # 2. Perbaiki dtype yang berbentuk Dictionary
+        if 'dtype' in config and isinstance(config['dtype'], dict):
+            config['dtype'] = 'float32'
+
+        # 3. Rekursif ke anak-anak dictionary (Penting!)
+        for key, value in config.items():
+            clean_config(value)
+            
     elif isinstance(config, list):
-        for item in config: clean_config(item)
+        # Jika bentuknya list, bersihkan setiap item di dalamnya
+        for item in config:
+            clean_config(item)
 
 @st.cache_resource
 def load_ai_model():
-    # 1. TAMPILKAN STATUS FILE DI LAYAR (DEBUGGING)
-    st.sidebar.markdown("### 🔍 System Info")
-    files_here = os.listdir('.')
-    st.sidebar.code(f"Files in dir:\n{files_here}")
-    
+    # Tampilkan lokasi file di sidebar untuk konfirmasi
     model_path = find_model_file()
-    
-    if model_path is None:
-        st.error("❌ CRITICAL ERROR: File 'best_model.h5' benar-benar tidak ditemukan di server.")
-        st.warning("Pastikan nama file di GitHub persis 'best_model.h5' (huruf kecil semua).")
-        return None
+    if model_path:
+        st.sidebar.success(f"Model ditemukan: {os.path.basename(model_path)}")
     else:
-        st.sidebar.success(f"File found at: {model_path}")
+        st.error("❌ File 'best_model.h5' belum terdeteksi. Upload dulu ke GitHub!")
+        return None
 
-    # 2. PROSES LOAD
     with st.spinner("⏳ Membedah & Memperbaiki Model..."):
         try:
-            # Cek apakah file itu LFS pointer (teks kecil) atau binary
-            file_size = os.path.getsize(model_path)
-            if file_size < 2000: # Jika file kurang dari 2KB, curiga ini cuma pointer LFS
-                with open(model_path, 'r', errors='ignore') as f:
-                    content = f.read()
-                    if "version https://git-lfs.github.com" in content:
-                        st.error("⚠️ FILE ERROR: Ini adalah file pointer Git LFS, bukan model asli!")
-                        st.info("Solusi: Hapus file .gitattributes di GitHub kamu, lalu upload ulang best_model.h5 secara manual (Add file -> Upload files).")
-                        return None
-
-            # LOAD H5PY & FIX CONFIG
+            # Buka file H5 secara manual
             with h5py.File(model_path, 'r') as f:
                 if 'model_config' not in f.attrs:
-                    raise ValueError("File h5 rusak atau tidak memiliki config.")
+                    raise ValueError("File rusak: Tidak ada config.")
+                # Ambil config JSON
                 model_config = json.loads(f.attrs.get('model_config'))
 
+            # BERSIHKAN CONFIG DARI 'time_major' DLL
             clean_config(model_config)
+
+            # Bangun ulang model dari config bersih
             model = model_from_json(json.dumps(model_config))
+            
+            # Isi nyawa (bobot) ke model
             model.load_weights(model_path)
             return model
 
