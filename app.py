@@ -7,13 +7,10 @@ import numpy as np
 from PIL import Image
 from datetime import datetime
 import json
-import h5py
 
 # ================== IMPORT TENSORFLOW ==================
 import tensorflow as tf
-from tensorflow.keras.models import model_from_json
-from tensorflow.keras.preprocessing.image import img_to_array
-from tensorflow.keras import layers, models, utils, preprocessing
+from tensorflow.keras import utils
 
 # ================== KONFIGURASI HALAMAN ==================
 st.set_page_config(
@@ -25,71 +22,30 @@ st.set_page_config(
 # ================== DEBUGGING (Cari File) ==================
 def find_model_file():
     # Cek folder saat ini
-    if os.path.exists("best_model.h5"): return os.path.abspath("best_model.h5")
+    if os.path.exists("best_model.h5"): 
+        return os.path.abspath("best_model.h5")
     # Cek folder aplikasi
     app_dir = os.path.dirname(os.path.realpath(__file__))
     file_path = os.path.join(app_dir, "best_model.h5")
-    if os.path.exists(file_path): return file_path
+    if os.path.exists(file_path): 
+        return file_path
     return None
 
-# ================== SMART LOADER (Pembersih Agresif) ==================
-def clean_config(config):
-    """
-    Membersihkan konfigurasi Keras 3 agar kompatibel dengan TF 2.13
-    """
-    if isinstance(config, dict):
-        # 1. Daftar "Racun" Keras 3 yang harus dibuang
-        keys_to_remove = ['time_major', 'ragged', 'batch_shape', 'batch_input_shape']
-        
-        for key in keys_to_remove:
-            if key in config:
-                del config[key]
-        
-        # 2. Perbaiki dtype yang berbentuk Dictionary
-        if 'dtype' in config and isinstance(config['dtype'], dict):
-            config['dtype'] = 'float32'
-
-        # 3. Rekursif ke anak-anak dictionary (Penting!)
-        for key, value in config.items():
-            clean_config(value)
-            
-    elif isinstance(config, list):
-        # Jika bentuknya list, bersihkan setiap item di dalamnya
-        for item in config:
-            clean_config(item)
-
+# ================== SMART LOADER ==================
 @st.cache_resource
 def load_ai_model():
-    # Tampilkan lokasi file di sidebar untuk konfirmasi
     model_path = find_model_file()
-    if model_path:
-        st.sidebar.success(f"Model ditemukan: {os.path.basename(model_path)}")
-    else:
-        st.error("❌ File 'best_model.h5' belum terdeteksi. Upload dulu ke GitHub!")
+    if not model_path:
+        st.error("❌ File 'best_model.h5' belum terdeteksi. Upload dulu ke folder proyek!")
         return None
-
-    with st.spinner("⏳ Membedah & Memperbaiki Model..."):
-        try:
-            # Buka file H5 secara manual
-            with h5py.File(model_path, 'r') as f:
-                if 'model_config' not in f.attrs:
-                    raise ValueError("File rusak: Tidak ada config.")
-                # Ambil config JSON
-                model_config = json.loads(f.attrs.get('model_config'))
-
-            # BERSIHKAN CONFIG DARI 'time_major' DLL
-            clean_config(model_config)
-
-            # Bangun ulang model dari config bersih
-            model = model_from_json(json.dumps(model_config))
-            
-            # Isi nyawa (bobot) ke model
-            model.load_weights(model_path)
-            return model
-
-        except Exception as e:
-            st.error(f"Gagal memuat model: {e}")
-            return None
+    try:
+        # Langsung load model (arsitektur + bobot)
+        model = tf.keras.models.load_model(model_path, compile=False)
+        st.sidebar.success(f"Model berhasil dimuat: {os.path.basename(model_path)}")
+        return model
+    except Exception as e:
+        st.error(f"Gagal memuat model: {e}")
+        return None
 
 model = load_ai_model()
 
@@ -97,7 +53,6 @@ model = load_ai_model()
 MODEL_LABELS = ["Blas", "Hawar Daun", "Tungro", "Sehat"]
 
 DISEASE_KB = {
-    # --- DETEKSI AI AKTIF ---
     "Blas": {
         "title": "Penyakit Blas (Leaf Blast)",
         "cause": "Jamur Pyricularia oryzae.",
@@ -126,7 +81,7 @@ DISEASE_KB = {
         "treatment": ["-"],
         "color": "green"
     },
-    # --- DUMMY DATA ---
+    # Dummy tambahan
     "Brown Spot": {
         "title": "Bercak Coklat (Brown Spot)",
         "cause": "Jamur Helminthosporium oryzae.",
@@ -145,13 +100,17 @@ DISEASE_KB = {
 
 # ================== FUNGSI PREDIKSI ==================
 def predict_image(image):
-    if model is None: return None
+    if model is None: 
+        return None
     
     if image.mode != "RGB": image = image.convert("RGB")
     img = image.resize((224, 224))
     
-    try: x = utils.img_to_array(img)
-    except AttributeError: x = preprocessing.image.img_to_array(img)
+    try: 
+        x = utils.img_to_array(img)
+    except AttributeError: 
+        from tensorflow.keras.preprocessing import image as kp_img
+        x = kp_img.img_to_array(img)
 
     x = np.expand_dims(x, axis=0)
     x = x / 255.0
