@@ -26,7 +26,7 @@ st.set_page_config(
     initial_sidebar_state="collapsed"
 )
 
-# ================== CSS TEMA HIJAU & FIX KAMERA ==================
+# ================== CSS FULL TEMA HIJAU ==================
 st.markdown("""
     <style>
     /* 1. Background Putih & Teks Gelap */
@@ -45,21 +45,48 @@ st.markdown("""
     }
     .stButton>button:hover { background-color: #388E3C; box-shadow: 0 4px 8px rgba(0,0,0,0.2); }
 
-    /* 5. FIX TAMPILAN KAMERA (Solusi Layar Hitam) */
-    /* Mengubah background area kamera jadi hijau transparan */
-    [data-testid="stCamera"] {
-        background-color: #1b5e20 !important; /* Hijau Tua Gelap biar kontras */
+    /* ============================================================ */
+    /* BAGIAN PENTING: MENGUBAH WARNA UPLOAD & KAMERA JADI HIJAU    */
+    /* ============================================================ */
+
+    /* A. UBAH WARNA AREA UPLOAD FILE */
+    [data-testid="stFileUploader"] {
+        background-color: #E8F5E9; /* Hijau Muda Lembut */
+        border: 2px dashed #4CAF50; /* Garis Putus-putus Hijau */
         border-radius: 15px;
-        padding: 10px;
+        padding: 20px;
     }
-    
-    /* Memaksa Tombol Kamera (Take Photo) jadi Putih/Terlihat */
-    button[kind="primary"] {
+    /* Tombol 'Browse files' di dalam uploader */
+    [data-testid="stFileUploader"] button {
         background-color: #4CAF50 !important;
         color: white !important;
-        border: 2px solid white !important;
+        border: none !important;
     }
-    
+    /* Teks instruksi 'Drag and drop' */
+    [data-testid="stFileUploader"] section > div {
+        color: #2E7D32 !important;
+    }
+
+    /* B. UBAH WARNA AREA KAMERA */
+    [data-testid="stCamera"] {
+        background-color: #2E7D32 !important; /* Hijau Tua (Frame Kamera) */
+        border-radius: 15px;
+        padding: 10px;
+        border: 4px solid #A5D6A7;
+    }
+    /* Tombol 'Take Photo' */
+    button[kind="primary"] {
+        background-color: #FFFFFF !important; /* Tombol Putih */
+        color: #2E7D32 !important; /* Teks Hijau */
+        border: 2px solid #2E7D32 !important;
+        font-weight: bold !important;
+    }
+    button[kind="primary"]:hover {
+        background-color: #E8F5E9 !important;
+    }
+
+    /* ============================================================ */
+
     /* 6. Pesan Error/Warning */
     .stWarning { background-color: #FFF3E0; color: #E65100; }
     .stSuccess { background-color: #E8F5E9; color: #2E7D32; }
@@ -141,14 +168,11 @@ def predict_image(image):
         idx = np.argmax(pred[0])
         confidence = float(np.max(pred[0])) * 100
         
-        # 3. LOGIKA FILTER "BUKAN PADI"
-        # Jika AI yakinnya di bawah 65%, kita anggap itu bukan padi (objek asing)
-        # Angka 65 bisa kamu naik turunkan sesuai selera
+        # 3. LOGIKA FILTER "BUKAN PADI" (Threshold 65%)
         THRESHOLD = 65.0 
         
         if confidence < THRESHOLD:
             label = "Bukan Padi"
-            # Kita set confidence 0 agar user waspada
             confidence = 0 
         else:
             label = MODEL_LABELS[idx] if idx < len(MODEL_LABELS) else "Sehat"
@@ -200,7 +224,7 @@ def scan_page():
     st.markdown("## 📸 Scan Tanaman")
     if model is None: st.warning("⚠️ Sedang menyiapkan AI, harap tunggu...")
     
-    # CSS di atas sudah menangani warna background kamera
+    # AREA SCAN SEKARANG SUDAH HIJAU LEWAT CSS
     col1, col2 = st.columns(2)
     with col1: img_file = st.camera_input("Buka Kamera")
     with col2: upl_file = st.file_uploader("Upload Foto", type=["jpg","png","jpeg"])
