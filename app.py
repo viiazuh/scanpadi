@@ -8,7 +8,7 @@ from PIL import Image
 from datetime import datetime
 import json
 import h5py
-import requests  # Kita butuh ini untuk download
+import requests
 
 # ================== IMPORT TENSORFLOW ==================
 import tensorflow as tf
@@ -25,12 +25,11 @@ st.set_page_config(
     initial_sidebar_state="collapsed"
 )
 
-# ================== FUNGSI DOWNLOAD MODEL (PENYELAMAT) ==================
+# ================== FUNGSI DOWNLOAD MODEL ==================
 def download_model_from_github():
     url = "https://github.com/viiazuh/scanpadi/raw/main/best_model.h5"
     save_path = "downloaded_model.h5"
     
-    # Cek jika file sudah ada dan ukurannya masuk akal (>1MB)
     if os.path.exists(save_path) and os.path.getsize(save_path) > 1000000:
         return save_path
     
@@ -67,7 +66,6 @@ def translate_config(config):
 
 @st.cache_resource
 def load_ai_model():
-    # 1. DOWNLOAD MODEL DULU
     model_path = download_model_from_github()
     
     if not model_path:
@@ -75,7 +73,6 @@ def load_ai_model():
         return None
 
     try:
-        # 2. BACA CONFIG & TERJEMAHKAN
         with h5py.File(model_path, 'r') as f:
             if 'model_config' not in f.attrs: raise ValueError("No config found")
             config_str = f.attrs.get('model_config')
@@ -84,11 +81,9 @@ def load_ai_model():
 
         translate_config(model_config)
 
-        # 3. BUILD MODEL
         with utils.custom_object_scope({}):
             model = models.model_from_json(json.dumps(model_config))
         
-        # 4. LOAD WEIGHTS
         model.load_weights(model_path)
         return model
 
@@ -177,20 +172,44 @@ def scan_page():
     if st.button("⬅ Kembali"): st.session_state.page = "home"
 
 def result_page():
-    if not st.session_state.result: st.session_state.page = "home"; st.rerun(); return
+    if not st.session_state.result: 
+        st.session_state.page = "home"
+        st.rerun()
+        return
+
     r = st.session_state.result
     info = r["detail"]
+    
     st.image(r["image"], use_column_width=True)
     st.markdown(f"## {info['title']}")
-    st.success(f"Confidence: {r['confidence']}%") if r['confidence'] > 80 else st.warning(f"Confidence: {r['confidence']}%")
+    
+    # PERBAIKAN UTAMA: Menggunakan IF biasa, bukan one-liner
+    if r['confidence'] > 80:
+        st.success(f"Confidence: {r['confidence']}%")
+    else:
+        st.warning(f"Confidence: {r['confidence']}%")
+        
     st.info(f"Penyebab: {info['cause']}")
+    
     c1, c2 = st.columns(2)
-    with c1: st.write("### 🛡 Pencegahan"); [st.write(f"- {p}") for p in info["prevention"]]
-    with c2: st.write("### 💊 Pengobatan"); [st.write(f"- {t}") for t in info["treatment"]]
+    # PERBAIKAN: Menggunakan loop biasa, bukan list comprehension
+    with c1: 
+        st.write("### 🛡 Pencegahan")
+        for p in info["prevention"]:
+            st.write(f"- {p}")
+            
+    with c2: 
+        st.write("### 💊 Pengobatan")
+        for t in info["treatment"]:
+            st.write(f"- {t}")
+
     if st.button("Simpan", use_container_width=True):
         st.session_state.history.insert(0, {"title": info["title"], "confidence": r["confidence"], "image": r["image"], "date": datetime.now().strftime("%d-%m %H:%M")})
         st.session_state.page = "home"; st.rerun()
-    if st.button("Scan Lagi"): st.session_state.page = "scan"; st.rerun()
+        
+    if st.button("Scan Lagi"): 
+        st.session_state.page = "scan"
+        st.rerun()
 
 if st.session_state.page == "home": home_page()
 elif st.session_state.page == "scan": scan_page()
