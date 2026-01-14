@@ -1,70 +1,26 @@
 import os
-import json
-import h5py
-import requests
 from datetime import datetime
 from PIL import Image
 import numpy as np
 import streamlit as st
 import tensorflow as tf
-from tensorflow.keras.models import model_from_json
 from tensorflow.keras import utils
 
 # ================== KONFIGURASI ==================
 os.environ["TF_CPP_MIN_LOG_LEVEL"] = "2"
 st.set_page_config(page_title="AI Kesehatan Padi", layout="wide", initial_sidebar_state="collapsed")
 
-# ================== DOWNLOAD MODEL OTOMATIS ==================
-def download_model_from_github():
-    url = "https://raw.githubusercontent.com/viiazuh/scanpadi/main/best_model.h5"
-    local_path = "best_model.h5"
-    if not os.path.exists(local_path):
-        st.info("Mengunduh model dari GitHub...")
-        r = requests.get(url, allow_redirects=True)
-        with open(local_path, "wb") as f:
-            f.write(r.content)
-        st.success("Model berhasil diunduh!")
-
-download_model_from_github()
-
-# ================== FUNGSIO FILE ==================
-def find_model_file():
-    if os.path.exists("best_model.h5"):
-        return os.path.abspath("best_model.h5")
-    return None
-
-# ================== CLEAN CONFIG UNTUK KERAS 3 ==================
-def clean_config(config):
-    if isinstance(config, dict):
-        for key in ['time_major', 'ragged', 'batch_shape', 'batch_input_shape']:
-            if key in config:
-                del config[key]
-        if 'dtype' in config and isinstance(config['dtype'], dict):
-            config['dtype'] = 'float32'
-        for k, v in config.items():
-            clean_config(v)
-    elif isinstance(config, list):
-        for item in config:
-            clean_config(item)
-
 # ================== LOAD MODEL ==================
+MODEL_PATH = "best_model_tf3.h5"  # pastikan model compatible Keras 3
+
 @st.cache_resource
 def load_ai_model():
-    model_path = find_model_file()
-    if not model_path:
-        st.error("❌ File 'best_model.h5' belum terdeteksi.")
+    if not os.path.exists(MODEL_PATH):
+        st.error(f"❌ File '{MODEL_PATH}' belum tersedia. Upload dulu model compatible Keras 3!")
         return None
-
     try:
-        with h5py.File(model_path, 'r') as f:
-            if 'model_config' not in f.attrs:
-                raise ValueError("File rusak: Tidak ada config.")
-            model_config = json.loads(f.attrs.get('model_config'))
-
-        clean_config(model_config)
-        model = model_from_json(json.dumps(model_config))
-        model.load_weights(model_path)
-        st.sidebar.success(f"Model berhasil dimuat: {os.path.basename(model_path)}")
+        model = tf.keras.models.load_model(MODEL_PATH, compile=False)
+        st.sidebar.success(f"Model berhasil dimuat: {os.path.basename(MODEL_PATH)}")
         return model
     except Exception as e:
         st.error(f"Gagal memuat model: {e}")
@@ -87,24 +43,14 @@ DISEASE_KB = {
                "treatment": ["Cabut tanaman sakit", "Insektisida sistemik"], "color": "red"},
     "Sehat": {"title": "Tanaman Sehat", "cause": "Kondisi optimal.",
               "prevention": ["Lanjutkan perawatan rutin"], "treatment": ["-"], "color": "green"},
-    "Brown Spot": {"title": "Bercak Coklat (Brown Spot)", "cause": "Jamur Helminthosporium oryzae.",
-                   "prevention": ["Pemupukan Kalium", "Benih sehat"], "treatment": ["Fungisida Difenokonazol"],
-                   "color": "brown"},
-    "Rice Hispa": {"title": "Hama Putih Palsu (Rice Hispa)", "cause": "Kumbang Dicladispa armigera.",
-                   "prevention": ["Pangkas daun bertelur"], "treatment": ["Insektisida Klorpirifos"], "color": "gray"}
 }
 
-# ================== FUNGSI PREDIKSI ==================
+# ================== PREDIKSI ==================
 def predict_image(image):
-    if model is None:
-        return None
+    if model is None: return None
     if image.mode != "RGB": image = image.convert("RGB")
     img = image.resize((224, 224))
-    try:
-        x = utils.img_to_array(img)
-    except AttributeError:
-        from tensorflow.keras.preprocessing import image as kp_img
-        x = kp_img.img_to_array(img)
+    x = utils.img_to_array(img)
     x = np.expand_dims(x, axis=0)/255.0
     pred = model.predict(x)
     idx = np.argmax(pred[0])
