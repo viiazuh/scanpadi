@@ -6,16 +6,14 @@ import streamlit as st
 import numpy as np
 from PIL import Image
 from datetime import datetime
+import json
+import h5py
 
-# ================== IMPORT TENSORFLOW (Versi Robust) ==================
-# Kita import tensorflow sebagai tf agar tidak kena error "ModuleNotFoundError"
+# ================== IMPORT TENSORFLOW ==================
 import tensorflow as tf
-
-# Definisi shortcut agar code lebih pendek
-models = tf.keras.models
-layers = tf.keras.layers
-utils = tf.keras.utils
-preprocessing = tf.keras.preprocessing
+from tensorflow.keras.models import model_from_json
+from tensorflow.keras.preprocessing.image import img_to_array
+from tensorflow.keras import layers, models, utils, preprocessing
 
 # ================== KONFIGURASI HALAMAN ==================
 st.set_page_config(
@@ -24,39 +22,80 @@ st.set_page_config(
     initial_sidebar_state="collapsed"
 )
 
-# ================== OBAT ERROR "batch_shape" ==================
-class FixedInputLayer(layers.InputLayer):
-    def __init__(self, *args, **kwargs):
-        # Buang argumen yang tidak dikenali TF versi lama
-        if "batch_shape" in kwargs:
-            kwargs.pop("batch_shape")
-        if "dtype" in kwargs:
-            kwargs.pop("dtype")
-        super().__init__(*args, **kwargs)
+# ================== FUNGSI PENYELAMAT MODEL (SMART LOADER) ==================
+def clean_config(config):
+    """
+    Fungsi rekursif untuk membersihkan konfigurasi model dari syntax Keras 3
+    agar bisa dibaca oleh TensorFlow 2.13 (Keras 2).
+    """
+    if isinstance(config, dict):
+        # 1. Hapus batch_shape (Penyebab Error InputLayer)
+        if 'batch_shape' in config:
+            del config['batch_shape']
+        
+        # 2. Perbaiki dtype policy (Penyebab Error Conv2D/Dense)
+        # Keras 3 pakai dict {'class_name': 'DTypePolicy'...}, Keras 2 cuma mau string 'float32'
+        if 'dtype' in config:
+            if isinstance(config['dtype'], dict):
+                config['dtype'] = 'float32'
+        
+        # 3. Hapus parameter lain yang sering bikin konflik
+        for key in ['time_major', 'ragged']:
+            if key in config:
+                del config[key]
 
-# ================== LOAD MODEL (DENGAN PATH OTOMATIS) ==================
+        # Lanjut bersihkan anak-anak dict ini
+        for key, value in config.items():
+            clean_config(value)
+            
+    elif isinstance(config, list):
+        for item in config:
+            clean_config(item)
+
 @st.cache_resource
 def load_ai_model():
-    with st.spinner("⏳ Memuat model AI..."):
+    with st.spinner("⏳ Membedah & Memperbaiki Model..."):
         try:
-            # 1. CARI LOKASI FILE SECARA ABSOLUT
-            # Ini mencari folder tempat app.py berada
-            dir_path = os.path.dirname(os.path.realpath(__file__))
-            file_path = os.path.join(dir_path, "best_model.h5")
+            model_path = "best_model.h5"
+            
+            # Cek keberadaan file
+            if not os.path.exists(model_path):
+                # Coba cari path absolut
+                model_path = os.path.join(os.path.dirname(os.path.realpath(__file__)), "best_model.h5")
+                if not os.path.exists(model_path):
+                    st.error("File 'best_model.h5' tidak ditemukan di GitHub!")
+                    return None
 
-            # 2. CEK APAKAH FILE ADA?
-            if not os.path.exists(file_path):
-                st.error(f"❌ File model tidak ditemukan!")
-                st.warning(f"Sistem mencari di: `{file_path}`")
-                st.info("Pastikan file 'best_model.h5' sudah di-upload ke GitHub sejajar dengan app.py")
-                return None
+            # LANGKAH 1: Buka file h5 secara manual
+            with h5py.File(model_path, 'r') as f:
+                # Ambil konfigurasi model (JSON string)
+                if 'model_config' not in f.attrs:
+                    raise ValueError("File h5 tidak memiliki model_config.")
+                
+                model_config_str = f.attrs.get('model_config')
+                # Decode jika dalam format bytes
+                if isinstance(model_config_str, bytes):
+                    model_config_str = model_config_str.decode('utf-8')
+                
+                # Parsing JSON
+                model_config = json.loads(model_config_str)
 
-            # 3. LOAD MODEL
-            model = models.load_model(file_path, compile=False, custom_objects={'InputLayer': FixedInputLayer})
+            # LANGKAH 2: Bersihkan Config dari syntax Keras 3
+            clean_config(model_config)
+
+            # LANGKAH 3: Bangun ulang arsitektur model dari JSON yang sudah bersih
+            # Ini akan membuat model "kosong" dengan struktur yang benar
+            model = model_from_json(json.dumps(model_config))
+
+            # LANGKAH 4: Isi bobot (weights) dari file asli ke model baru
+            # Kita load weights by name untuk keamanan ekstra
+            model.load_weights(model_path)
+            
             return model
 
         except Exception as e:
             st.error(f"Gagal memuat model: {e}")
+            st.warning("Pastikan file best_model.h5 tidak rusak.")
             return None
 
 model = load_ai_model()
@@ -119,7 +158,7 @@ def predict_image(image):
     if image.mode != "RGB": image = image.convert("RGB")
     img = image.resize((224, 224))
     
-    # Cara aman convert ke array (support berbagai versi TF)
+    # Robust img_to_array
     try:
         x = utils.img_to_array(img)
     except AttributeError:
@@ -224,7 +263,12 @@ def result_page():
     
     st.image(r["image"], use_column_width=True)
     st.markdown(f"## {info['title']}")
-    st.success(f"Confidence: {r['confidence']}%")
+    
+    if r['confidence'] > 80:
+        st.success(f"Confidence: {r['confidence']}%")
+    else:
+        st.warning(f"Confidence: {r['confidence']}%")
+        
     st.info(f"Penyebab: {info['cause']}")
     
     c1, c2 = st.columns(2)
