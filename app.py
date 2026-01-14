@@ -11,7 +11,7 @@ import h5py
 
 # ================== IMPORT TENSORFLOW ==================
 import tensorflow as tf
-# Shortcut agar code lebih ringkas dan aman
+# Shortcut
 keras = tf.keras
 models = keras.models
 layers = keras.layers
@@ -33,71 +33,75 @@ def find_model_file():
     if os.path.exists(file_path): return file_path
     return None
 
-# ================== ULTRA-SMART LOADER ==================
-def clean_config(config):
+# ================== TRANSLATOR KERAS 3 KE KERAS 2 ==================
+def translate_config(config):
     """
-    Membersihkan konfigurasi Keras 3 secara agresif namun aman (anti-crash).
+    Menerjemahkan config Keras 3 agar bisa dibaca Keras 2.
+    Bukan dihapus, tapi disesuaikan.
     """
     if isinstance(config, dict):
-        # 1. Daftar kunci Keras 3 yang tidak dikenali Keras 2
-        keys_to_remove = [
-            'time_major', 'ragged', 'batch_shape', 'batch_input_shape', 
-            'build_config', 'compile_config', 'registered_name'
-        ]
+        # 1. TRANSLATE: batch_shape (Keras 3) -> batch_input_shape (Keras 2)
+        if 'batch_shape' in config:
+            config['batch_input_shape'] = config['batch_shape']
+            del config['batch_shape']
         
-        for key in keys_to_remove:
-            if key in config:
-                del config[key]
-        
-        # 2. Perbaiki dtype (Keras 3 pakai dict, Keras 2 pakai string)
+        # 2. FIX: dtype policy dictionary -> string simple
         if 'dtype' in config:
+            # Jika dtype berbentuk dict {'class_name':...}, ambil 'float32' aja
             if isinstance(config['dtype'], dict):
                 config['dtype'] = 'float32'
-            elif config['dtype'] is None: # Fix untuk error NoneType
+            # Jika dtype None, paksa jadi float32
+            elif config['dtype'] is None:
                 config['dtype'] = 'float32'
 
-        # 3. Rekursif aman (Cek apakah value tidak None sebelum diproses)
+        # 3. HAPUS: Fitur Keras 3 yang tidak ada di Keras 2
+        ignore_keys = ['time_major', 'ragged', 'build_config', 'compile_config']
+        for k in ignore_keys:
+            if k in config:
+                del config[k]
+
+        # 4. REKURSIF (Lanjut ke anak-anaknya)
         for key, value in config.items():
-            if value is not None:
-                clean_config(value)
+            translate_config(value)
             
     elif isinstance(config, list):
         for item in config:
-            if item is not None:
-                clean_config(item)
+            translate_config(item)
 
 @st.cache_resource
 def load_ai_model():
     model_path = find_model_file()
     
     if not model_path:
-        st.error("❌ File 'best_model.h5' tidak ditemukan.")
+        st.error("❌ File 'best_model.h5' tidak ditemukan di server.")
         return None
 
-    # Tampilkan info file di sidebar untuk memastikan file terbaca
-    st.sidebar.success(f"File loaded: {os.path.basename(model_path)}")
+    st.sidebar.success(f"File ditemukan: {os.path.basename(model_path)}")
 
-    with st.spinner("⏳ Memproses arsitektur model..."):
-        try:
-            # 1. Buka File H5
+    # GLOBAL TRY-EXCEPT: Agar aplikasi tidak pernah crash total
+    try:
+        with st.spinner("⏳ Menerjemahkan Model Keras 3 ke Keras 2..."):
+            
+            # 1. Buka File H5 & Ambil JSON Config
             with h5py.File(model_path, 'r') as f:
                 if 'model_config' not in f.attrs:
-                    st.error("File rusak: Tidak ada 'model_config' di dalam h5.")
-                    return None
+                    raise ValueError("File h5 tidak memiliki 'model_config'.")
                 
-                # Ambil config JSON
                 config_str = f.attrs.get('model_config')
                 if config_str is None:
-                    st.error("Config model kosong (None).")
-                    return None
+                    raise ValueError("Config model bernilai None.")
+                    
+                # Decode jika bytes
+                if isinstance(config_str, bytes):
+                    config_str = config_str.decode('utf-8')
                     
                 model_config = json.loads(config_str)
 
-            # 2. BERSIHKAN CONFIG (Penyebab utama error)
-            clean_config(model_config)
+            # 2. LAKUKAN PENERJEMAHAN (TRANSLATE)
+            translate_config(model_config)
 
-            # 3. BANGUN ULANG MODEL DARI JSON BERSIH
-            # Gunakan custom_object_scope agar layer aneh diabaikan
+            # 3. BANGUN ULANG MODEL DARI JSON YANG SUDAH DITERJEMAHKAN
+            # Gunakan scope kosong untuk menghindari error custom object
             with utils.custom_object_scope({}):
                 model = models.model_from_json(json.dumps(model_config))
             
@@ -106,12 +110,13 @@ def load_ai_model():
             
             return model
 
-        except Exception as e:
-            # Tampilkan error detail tapi jangan hentikan aplikasi total
-            st.error(f"Gagal memuat model: {e}")
-            st.warning("⚠️ Mengaktifkan Mode Darurat: Aplikasi berjalan, tapi AI dimatikan sementara.")
-            return None
+    except Exception as e:
+        # TANGKAP ERROR AGAR TIDAK CRASH
+        st.error(f"⚠️ Gagal memuat model AI: {e}")
+        st.warning("Aplikasi beralih ke 'Mode Simulasi' agar tetap bisa digunakan.")
+        return None
 
+# Load model dengan aman
 model = load_ai_model()
 
 # ================== DATABASE INFO ==================
@@ -128,6 +133,7 @@ DISEASE_KB = {
 
 # ================== FUNGSI PREDIKSI ==================
 def predict_image(image):
+    # Jika model None, return None (biar UI yang handle)
     if model is None: return None
     
     if image.mode != "RGB": image = image.convert("RGB")
@@ -191,6 +197,11 @@ def home_page():
 
 def scan_page():
     st.markdown("## 📸 Scan Tanaman")
+    
+    # Notifikasi status model
+    if model is None:
+        st.warning("⚠️ Model AI sedang offline (Mode Simulasi Aktif). Silakan gunakan 'Mode Developer' di sidebar.")
+    
     img_file = st.camera_input("Ambil Foto")
     upl_file = st.file_uploader("Upload Foto", type=["jpg","png","jpeg"])
     
@@ -200,17 +211,15 @@ def scan_page():
     
     if image:
         st.image(image, caption="Preview", use_column_width=True)
-        if st.button("🔍 Analisis AI", use_container_width=True):
-            if model is None:
-                st.error("Model Error. Gunakan Mode Developer.")
-            else:
-                with st.spinner("Menganalisis..."):
-                    res = predict_image(image)
-                    if res:
-                        res["image"] = image
-                        st.session_state.result = res
-                        st.session_state.page = "result"
-                        st.rerun()
+        # Disable tombol jika model error
+        if st.button("🔍 Analisis AI", use_container_width=True, disabled=(model is None)):
+            with st.spinner("Menganalisis..."):
+                res = predict_image(image)
+                if res:
+                    res["image"] = image
+                    st.session_state.result = res
+                    st.session_state.page = "result"
+                    st.rerun()
     if st.button("⬅ Kembali"): st.session_state.page = "home"
 
 def result_page():
@@ -231,6 +240,7 @@ def result_page():
         st.session_state.page = "home"; st.rerun()
     if st.button("Scan Lagi"): st.session_state.page = "scan"; st.rerun()
 
+# Routing sederhana
 if st.session_state.page == "home": home_page()
 elif st.session_state.page == "scan": scan_page()
 elif st.session_state.page == "result": result_page()
