@@ -22,80 +22,82 @@ st.set_page_config(
     initial_sidebar_state="collapsed"
 )
 
-# ================== FUNGSI PENYELAMAT MODEL (SMART LOADER) ==================
-def clean_config(config):
-    """
-    Fungsi rekursif untuk membersihkan konfigurasi model dari syntax Keras 3
-    agar bisa dibaca oleh TensorFlow 2.13 (Keras 2).
-    """
-    if isinstance(config, dict):
-        # 1. Hapus batch_shape (Penyebab Error InputLayer)
-        if 'batch_shape' in config:
-            del config['batch_shape']
+# ================== DEBUGGING AREA (Cari File) ==================
+# Fungsi ini akan mencari file .h5 di seluruh folder
+def find_model_file():
+    current_dir = os.getcwd()
+    # Cek di folder sekarang
+    if os.path.exists("best_model.h5"):
+        return os.path.abspath("best_model.h5")
+    
+    # Cek sejajar dengan app.py
+    app_dir = os.path.dirname(os.path.realpath(__file__))
+    file_path = os.path.join(app_dir, "best_model.h5")
+    if os.path.exists(file_path):
+        return file_path
         
-        # 2. Perbaiki dtype policy (Penyebab Error Conv2D/Dense)
-        # Keras 3 pakai dict {'class_name': 'DTypePolicy'...}, Keras 2 cuma mau string 'float32'
-        if 'dtype' in config:
-            if isinstance(config['dtype'], dict):
-                config['dtype'] = 'float32'
-        
-        # 3. Hapus parameter lain yang sering bikin konflik
-        for key in ['time_major', 'ragged']:
-            if key in config:
-                del config[key]
+    # Kalau tidak ketemu, cari recursive (darurat)
+    for root, dirs, files in os.walk(current_dir):
+        for file in files:
+            if file == "best_model.h5":
+                return os.path.join(root, file)
+    return None
 
-        # Lanjut bersihkan anak-anak dict ini
-        for key, value in config.items():
-            clean_config(value)
-            
+# ================== SMART LOADER (Pembersih Config Keras 3) ==================
+def clean_config(config):
+    if isinstance(config, dict):
+        if 'batch_shape' in config: del config['batch_shape']
+        if 'dtype' in config:
+            if isinstance(config['dtype'], dict): config['dtype'] = 'float32'
+        for key in ['time_major', 'ragged', 'name']:
+            if key in config and key == 'name' and config[key] == 'input_layer': pass # Keep name if needed
+            elif key in ['time_major', 'ragged']: del config[key]
+        for key, value in config.items(): clean_config(value)
     elif isinstance(config, list):
-        for item in config:
-            clean_config(item)
+        for item in config: clean_config(item)
 
 @st.cache_resource
 def load_ai_model():
+    # 1. TAMPILKAN STATUS FILE DI LAYAR (DEBUGGING)
+    st.sidebar.markdown("### 🔍 System Info")
+    files_here = os.listdir('.')
+    st.sidebar.code(f"Files in dir:\n{files_here}")
+    
+    model_path = find_model_file()
+    
+    if model_path is None:
+        st.error("❌ CRITICAL ERROR: File 'best_model.h5' benar-benar tidak ditemukan di server.")
+        st.warning("Pastikan nama file di GitHub persis 'best_model.h5' (huruf kecil semua).")
+        return None
+    else:
+        st.sidebar.success(f"File found at: {model_path}")
+
+    # 2. PROSES LOAD
     with st.spinner("⏳ Membedah & Memperbaiki Model..."):
         try:
-            model_path = "best_model.h5"
-            
-            # Cek keberadaan file
-            if not os.path.exists(model_path):
-                # Coba cari path absolut
-                model_path = os.path.join(os.path.dirname(os.path.realpath(__file__)), "best_model.h5")
-                if not os.path.exists(model_path):
-                    st.error("File 'best_model.h5' tidak ditemukan di GitHub!")
-                    return None
+            # Cek apakah file itu LFS pointer (teks kecil) atau binary
+            file_size = os.path.getsize(model_path)
+            if file_size < 2000: # Jika file kurang dari 2KB, curiga ini cuma pointer LFS
+                with open(model_path, 'r', errors='ignore') as f:
+                    content = f.read()
+                    if "version https://git-lfs.github.com" in content:
+                        st.error("⚠️ FILE ERROR: Ini adalah file pointer Git LFS, bukan model asli!")
+                        st.info("Solusi: Hapus file .gitattributes di GitHub kamu, lalu upload ulang best_model.h5 secara manual (Add file -> Upload files).")
+                        return None
 
-            # LANGKAH 1: Buka file h5 secara manual
+            # LOAD H5PY & FIX CONFIG
             with h5py.File(model_path, 'r') as f:
-                # Ambil konfigurasi model (JSON string)
                 if 'model_config' not in f.attrs:
-                    raise ValueError("File h5 tidak memiliki model_config.")
-                
-                model_config_str = f.attrs.get('model_config')
-                # Decode jika dalam format bytes
-                if isinstance(model_config_str, bytes):
-                    model_config_str = model_config_str.decode('utf-8')
-                
-                # Parsing JSON
-                model_config = json.loads(model_config_str)
+                    raise ValueError("File h5 rusak atau tidak memiliki config.")
+                model_config = json.loads(f.attrs.get('model_config'))
 
-            # LANGKAH 2: Bersihkan Config dari syntax Keras 3
             clean_config(model_config)
-
-            # LANGKAH 3: Bangun ulang arsitektur model dari JSON yang sudah bersih
-            # Ini akan membuat model "kosong" dengan struktur yang benar
             model = model_from_json(json.dumps(model_config))
-
-            # LANGKAH 4: Isi bobot (weights) dari file asli ke model baru
-            # Kita load weights by name untuk keamanan ekstra
             model.load_weights(model_path)
-            
             return model
 
         except Exception as e:
             st.error(f"Gagal memuat model: {e}")
-            st.warning("Pastikan file best_model.h5 tidak rusak.")
             return None
 
 model = load_ai_model()
@@ -154,28 +156,20 @@ DISEASE_KB = {
 def predict_image(image):
     if model is None: return None
     
-    # Preprocess
     if image.mode != "RGB": image = image.convert("RGB")
     img = image.resize((224, 224))
     
-    # Robust img_to_array
-    try:
-        x = utils.img_to_array(img)
-    except AttributeError:
-        x = preprocessing.image.img_to_array(img)
+    try: x = utils.img_to_array(img)
+    except AttributeError: x = preprocessing.image.img_to_array(img)
 
     x = np.expand_dims(x, axis=0)
     x = x / 255.0
     
-    # Predict
     pred = model.predict(x)
     idx = np.argmax(pred[0])
     confidence = float(np.max(pred[0])) * 100
     
-    if idx < len(MODEL_LABELS):
-        label = MODEL_LABELS[idx]
-    else:
-        label = "Sehat"
+    label = MODEL_LABELS[idx] if idx < len(MODEL_LABELS) else "Sehat"
     
     return {
         "hasil": label,
@@ -263,12 +257,8 @@ def result_page():
     
     st.image(r["image"], use_column_width=True)
     st.markdown(f"## {info['title']}")
-    
-    if r['confidence'] > 80:
-        st.success(f"Confidence: {r['confidence']}%")
-    else:
-        st.warning(f"Confidence: {r['confidence']}%")
-        
+    if r['confidence'] > 80: st.success(f"Confidence: {r['confidence']}%")
+    else: st.warning(f"Confidence: {r['confidence']}%")
     st.info(f"Penyebab: {info['cause']}")
     
     c1, c2 = st.columns(2)
