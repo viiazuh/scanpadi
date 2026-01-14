@@ -1,28 +1,22 @@
 import os
-# ================== KONFIGURASI ENV ==================
-os.environ["TF_CPP_MIN_LOG_LEVEL"] = "2"
-
-import streamlit as st
-import numpy as np
-from PIL import Image
-from datetime import datetime
 import json
+import h5py
 import requests
-
-# ================== IMPORT TENSORFLOW ==================
+from datetime import datetime
+from PIL import Image
+import numpy as np
+import streamlit as st
 import tensorflow as tf
+from tensorflow.keras.models import model_from_json
 from tensorflow.keras import utils
 
-# ================== KONFIGURASI HALAMAN ==================
-st.set_page_config(
-    page_title="AI Kesehatan Padi",
-    layout="wide",
-    initial_sidebar_state="collapsed"
-)
+# ================== KONFIGURASI ==================
+os.environ["TF_CPP_MIN_LOG_LEVEL"] = "2"
+st.set_page_config(page_title="AI Kesehatan Padi", layout="wide", initial_sidebar_state="collapsed")
 
 # ================== DOWNLOAD MODEL OTOMATIS ==================
 def download_model_from_github():
-    url = "https://raw.githubusercontent.com/viiazuh/viiazuh/main/best_model.h5"
+    url = "https://raw.githubusercontent.com/viiazuh/scanpadi/main/best_model.h5"
     local_path = "best_model.h5"
     if not os.path.exists(local_path):
         st.info("Mengunduh model dari GitHub...")
@@ -31,18 +25,27 @@ def download_model_from_github():
             f.write(r.content)
         st.success("Model berhasil diunduh!")
 
-# Panggil download sebelum load model
 download_model_from_github()
 
-# ================== DEBUGGING (Cari File) ==================
+# ================== FUNGSIO FILE ==================
 def find_model_file():
-    if os.path.exists("best_model.h5"): 
+    if os.path.exists("best_model.h5"):
         return os.path.abspath("best_model.h5")
-    app_dir = os.path.dirname(os.path.realpath(__file__))
-    file_path = os.path.join(app_dir, "best_model.h5")
-    if os.path.exists(file_path): 
-        return file_path
     return None
+
+# ================== CLEAN CONFIG UNTUK KERAS 3 ==================
+def clean_config(config):
+    if isinstance(config, dict):
+        for key in ['time_major', 'ragged', 'batch_shape', 'batch_input_shape']:
+            if key in config:
+                del config[key]
+        if 'dtype' in config and isinstance(config['dtype'], dict):
+            config['dtype'] = 'float32'
+        for k, v in config.items():
+            clean_config(v)
+    elif isinstance(config, list):
+        for item in config:
+            clean_config(item)
 
 # ================== LOAD MODEL ==================
 @st.cache_resource
@@ -51,8 +54,16 @@ def load_ai_model():
     if not model_path:
         st.error("❌ File 'best_model.h5' belum terdeteksi.")
         return None
+
     try:
-        model = tf.keras.models.load_model(model_path, compile=False)
+        with h5py.File(model_path, 'r') as f:
+            if 'model_config' not in f.attrs:
+                raise ValueError("File rusak: Tidak ada config.")
+            model_config = json.loads(f.attrs.get('model_config'))
+
+        clean_config(model_config)
+        model = model_from_json(json.dumps(model_config))
+        model.load_weights(model_path)
         st.sidebar.success(f"Model berhasil dimuat: {os.path.basename(model_path)}")
         return model
     except Exception as e:
@@ -61,83 +72,45 @@ def load_ai_model():
 
 model = load_ai_model()
 
-# ================== DATABASE INFO ==================
+# ================== DATABASE ==================
 MODEL_LABELS = ["Blas", "Hawar Daun", "Tungro", "Sehat"]
 
 DISEASE_KB = {
-    "Blas": {
-        "title": "Penyakit Blas (Leaf Blast)",
-        "cause": "Jamur Pyricularia oryzae.",
-        "prevention": ["Gunakan varietas tahan", "Hindari pupuk N berlebih"],
-        "treatment": ["Fungisida Tricyclazole", "Bakar jerami sisa"],
-        "color": "red"
-    },
-    "Hawar Daun": {
-        "title": "Hawar Daun Bakteri (Kresek)",
-        "cause": "Bakteri Xanthomonas oryzae.",
-        "prevention": ["Atur pengairan", "Kurangi Urea"],
-        "treatment": ["Bakterisida tembaga", "Keringkan sawah berkala"],
-        "color": "orange"
-    },
-    "Tungro": {
-        "title": "Penyakit Tungro",
-        "cause": "Virus dari wereng hijau.",
-        "prevention": ["Tanam serempak", "Kendalikan wereng hijau"],
-        "treatment": ["Cabut tanaman sakit", "Insektisida sistemik"],
-        "color": "red"
-    },
-    "Sehat": {
-        "title": "Tanaman Sehat",
-        "cause": "Kondisi optimal.",
-        "prevention": ["Lanjutkan perawatan rutin"],
-        "treatment": ["-"],
-        "color": "green"
-    },
-    # Dummy tambahan
-    "Brown Spot": {
-        "title": "Bercak Coklat (Brown Spot)",
-        "cause": "Jamur Helminthosporium oryzae.",
-        "prevention": ["Pemupukan Kalium", "Benih sehat"],
-        "treatment": ["Fungisida Difenokonazol"],
-        "color": "brown"
-    },
-    "Rice Hispa": {
-        "title": "Hama Putih Palsu (Rice Hispa)",
-        "cause": "Kumbang Dicladispa armigera.",
-        "prevention": ["Pangkas daun bertelur"],
-        "treatment": ["Insektisida Klorpirifos"],
-        "color": "gray"
-    }
+    "Blas": {"title": "Penyakit Blas (Leaf Blast)", "cause": "Jamur Pyricularia oryzae.",
+             "prevention": ["Gunakan varietas tahan", "Hindari pupuk N berlebih"],
+             "treatment": ["Fungisida Tricyclazole", "Bakar jerami sisa"], "color": "red"},
+    "Hawar Daun": {"title": "Hawar Daun Bakteri (Kresek)", "cause": "Bakteri Xanthomonas oryzae.",
+                   "prevention": ["Atur pengairan", "Kurangi Urea"],
+                   "treatment": ["Bakterisida tembaga", "Keringkan sawah berkala"], "color": "orange"},
+    "Tungro": {"title": "Penyakit Tungro", "cause": "Virus dari wereng hijau.",
+               "prevention": ["Tanam serempak", "Kendalikan wereng hijau"],
+               "treatment": ["Cabut tanaman sakit", "Insektisida sistemik"], "color": "red"},
+    "Sehat": {"title": "Tanaman Sehat", "cause": "Kondisi optimal.",
+              "prevention": ["Lanjutkan perawatan rutin"], "treatment": ["-"], "color": "green"},
+    "Brown Spot": {"title": "Bercak Coklat (Brown Spot)", "cause": "Jamur Helminthosporium oryzae.",
+                   "prevention": ["Pemupukan Kalium", "Benih sehat"], "treatment": ["Fungisida Difenokonazol"],
+                   "color": "brown"},
+    "Rice Hispa": {"title": "Hama Putih Palsu (Rice Hispa)", "cause": "Kumbang Dicladispa armigera.",
+                   "prevention": ["Pangkas daun bertelur"], "treatment": ["Insektisida Klorpirifos"], "color": "gray"}
 }
 
 # ================== FUNGSI PREDIKSI ==================
 def predict_image(image):
-    if model is None: 
+    if model is None:
         return None
-    
     if image.mode != "RGB": image = image.convert("RGB")
     img = image.resize((224, 224))
-    
-    try: 
+    try:
         x = utils.img_to_array(img)
-    except AttributeError: 
+    except AttributeError:
         from tensorflow.keras.preprocessing import image as kp_img
         x = kp_img.img_to_array(img)
-
-    x = np.expand_dims(x, axis=0)
-    x = x / 255.0
-    
+    x = np.expand_dims(x, axis=0)/255.0
     pred = model.predict(x)
     idx = np.argmax(pred[0])
-    confidence = float(np.max(pred[0])) * 100
-    
+    confidence = float(np.max(pred[0]))*100
     label = MODEL_LABELS[idx] if idx < len(MODEL_LABELS) else "Sehat"
-    
-    return {
-        "hasil": label,
-        "confidence": round(confidence, 1),
-        "detail": DISEASE_KB.get(label, DISEASE_KB["Sehat"])
-    }
+    return {"hasil": label, "confidence": round(confidence,1), "detail": DISEASE_KB.get(label, DISEASE_KB["Sehat"])}
 
 # ================== SESSION STATE ==================
 if "page" not in st.session_state: st.session_state.page = "home"
@@ -150,29 +123,25 @@ with st.sidebar:
     st.info("Simulasi data jika model belum siap.")
     sim_disease = st.selectbox("Pilih Penyakit", list(DISEASE_KB.keys()))
     if st.button("Tampilkan Info Dummy"):
-        st.session_state.result = {
-            "hasil": sim_disease,
-            "confidence": 100.0,
-            "detail": DISEASE_KB[sim_disease],
-            "image": Image.new('RGB', (200, 200), color=DISEASE_KB[sim_disease]['color'])
-        }
+        st.session_state.result = {"hasil": sim_disease, "confidence": 100.0,
+                                   "detail": DISEASE_KB[sim_disease],
+                                   "image": Image.new('RGB', (200, 200), color=DISEASE_KB[sim_disease]['color'])}
         st.session_state.page = "result"
         st.rerun()
 
 # ================== HALAMAN ==================
 def home_page():
     st.markdown("## 🌾 Dashboard Kesehatan Padi")
-    col1, col2 = st.columns([3,1])
+    col1,col2 = st.columns([3,1])
     with col2:
         if st.button("➕ Scan Baru", use_container_width=True):
             st.session_state.page = "scan"
-    
     if not st.session_state.history:
         st.info("Belum ada riwayat.")
     else:
-        for i, h in enumerate(st.session_state.history):
+        for i,h in enumerate(st.session_state.history):
             with st.container():
-                c1, c2 = st.columns([1,3])
+                c1,c2 = st.columns([1,3])
                 with c1: st.image(h["image"], use_column_width=True)
                 with c2:
                     st.markdown(f"**{h['title']}**")
@@ -184,14 +153,11 @@ def home_page():
 
 def scan_page():
     st.markdown("## 📸 Scan Tanaman")
-    
     img_file = st.camera_input("Ambil Foto")
     upl_file = st.file_uploader("Upload Foto", type=["jpg","png","jpeg"])
-    
     image = None
     if img_file: image = Image.open(img_file)
     elif upl_file: image = Image.open(upl_file)
-    
     if image:
         st.image(image, caption="Preview", use_column_width=True)
         if st.button("🔍 Analisis AI", use_container_width=True):
@@ -201,51 +167,43 @@ def scan_page():
                 with st.spinner("Menganalisis..."):
                     res = predict_image(image)
                     if res:
-                        res["image"] = image
-                        st.session_state.result = res
-                        st.session_state.page = "result"
+                        res["image"]=image
+                        st.session_state.result=res
+                        st.session_state.page="result"
                         st.rerun()
-    
-    if st.button("⬅ Kembali"): st.session_state.page = "home"
+    if st.button("⬅ Kembali"): st.session_state.page="home"
 
 def result_page():
     if not st.session_state.result:
-        st.session_state.page = "home"
+        st.session_state.page="home"
         st.rerun()
         return
-
-    r = st.session_state.result
-    info = r["detail"]
-    
+    r=st.session_state.result
+    info=r["detail"]
     st.image(r["image"], use_column_width=True)
     st.markdown(f"## {info['title']}")
-    if r['confidence'] > 80: st.success(f"Confidence: {r['confidence']}%")
+    if r['confidence']>80: st.success(f"Confidence: {r['confidence']}%")
     else: st.warning(f"Confidence: {r['confidence']}%")
     st.info(f"Penyebab: {info['cause']}")
-    
-    c1, c2 = st.columns(2)
-    with c1: 
+    c1,c2=st.columns(2)
+    with c1:
         st.write("### 🛡 Pencegahan")
         for p in info["prevention"]: st.write(f"- {p}")
     with c2:
         st.write("### 💊 Pengobatan")
         for t in info["treatment"]: st.write(f"- {t}")
-
     if st.button("Simpan", use_container_width=True):
-        st.session_state.history.insert(0, {
-            "title": info["title"],
-            "confidence": r["confidence"],
-            "image": r["image"],
-            "date": datetime.now().strftime("%d-%m %H:%M")
+        st.session_state.history.insert(0,{
+            "title":info["title"],"confidence":r["confidence"],"image":r["image"],
+            "date":datetime.now().strftime("%d-%m %H:%M")
         })
-        st.session_state.page = "home"
+        st.session_state.page="home"
         st.rerun()
-
     if st.button("Scan Lagi"):
-        st.session_state.page = "scan"
+        st.session_state.page="scan"
         st.rerun()
 
 # ================== ROUTING ==================
-if st.session_state.page == "home": home_page()
-elif st.session_state.page == "scan": scan_page()
-elif st.session_state.page == "result": result_page()
+if st.session_state.page=="home": home_page()
+elif st.session_state.page=="scan": scan_page()
+elif st.session_state.page=="result": result_page()
