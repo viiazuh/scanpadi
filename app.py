@@ -1,6 +1,5 @@
 import os
 # ================== KONFIGURASI TENSORFLOW ==================
-# Memaksa menggunakan implementasi Keras legacy untuk kompatibilitas
 os.environ["TF_USE_LEGACY_KERAS"] = "1"
 os.environ["TF_ENABLE_ONEDNN_OPTS"] = "0"
 os.environ["TF_CPP_MIN_LOG_LEVEL"] = "2"
@@ -10,21 +9,24 @@ import streamlit as st
 import numpy as np
 from PIL import Image
 from datetime import datetime
+
+# --- IMPORT TENSORFLOW YANG LEBIH AMAN ---
 import tensorflow as tf
 
-# --- BAGIAN INI DIPERBAIKI (SIMPLIFIED IMPORTS) ---
-# Kita gunakan jalur import standar untuk TF 2.15.0
+# Kita definisikan shortcut agar code di bawah tidak perlu diubah banyak
+# Ini menghindari error "No module named tensorflow.keras"
 try:
-    from tensorflow.keras.models import load_model
-    from tensorflow.keras.layers import InputLayer
-    # Coba import img_to_array dari utils (lokasi baru) atau preprocessing (lokasi lama)
-    try:
-        from tensorflow.keras.utils import img_to_array
-    except ImportError:
-        from tensorflow.keras.preprocessing.image import img_to_array
-except ImportError as e:
-    st.error(f"Error Import TensorFlow: {e}")
-    st.stop()
+    models = tf.keras.models
+    layers = tf.keras.layers
+    utils = tf.keras.utils
+    preprocessing = tf.keras.preprocessing
+except AttributeError:
+    # Fallback untuk versi TF yang sangat baru/sangat lama
+    import keras
+    models = keras.models
+    layers = keras.layers
+    utils = keras.utils
+    preprocessing = keras.preprocessing
 
 # ================== KONFIGURASI HALAMAN ==================
 st.set_page_config(
@@ -33,11 +35,11 @@ st.set_page_config(
     initial_sidebar_state="collapsed"
 )
 
-# ================== PERBAIKAN KOMPATIBILITAS MODEL (ANTI-ERROR) ==================
+# ================== PERBAIKAN KOMPATIBILITAS MODEL ==================
 # Class ini dimodifikasi untuk membuang SEMUA argumen config yang tidak dikenali
-class FixedInputLayer(InputLayer):
+class FixedInputLayer(layers.InputLayer):
     def __init__(self, *args, **kwargs):
-        # Daftar argumen yang sering bikin error di TensorFlow versi baru
+        # Daftar argumen yang sering bikin error
         ignore_keys = ['batch_shape', 'batch_input_shape', 'sparse', 'ragged', 'dtype']
         for k in ignore_keys:
             if k in kwargs:
@@ -50,19 +52,17 @@ def load_ai_model():
     with st.spinner("⏳ Memuat model AI, mohon tunggu..."):
         try:
             # Load model dengan custom object FixedInputLayer
-            return load_model("best_model.h5", compile=False, custom_objects={'InputLayer': FixedInputLayer})
+            # Menggunakan tf.keras.models.load_model
+            return models.load_model("best_model.h5", compile=False, custom_objects={'InputLayer': FixedInputLayer})
         except Exception as e:
-            st.error(f"Gagal memuat model. Pastikan requirements.txt berisi 'tensorflow==2.15.0'. Error: {e}")
+            st.error(f"Gagal memuat model. Error detail: {e}")
             return None
 
 model = load_ai_model()
 
 # ================== DATABASE LABELS & PENYAKIT ==================
-
-# LABEL ASLI MODEL (Hanya 4 ini yang bisa diprediksi AI saat ini)
 MODEL_LABELS = ["Blas", "Hawar Daun", "Tungro", "Sehat"]
 
-# DATABASE LENGKAP (Termasuk Dummy Data untuk penyakit yang belum didukung AI)
 DISEASE_KB = {
     # --- DETEKSI AI AKTIF ---
     "Blas": {
@@ -93,48 +93,47 @@ DISEASE_KB = {
         "treatment": ["Tidak perlu tindakan"],
         "color": "green"
     },
-
-    # --- DUMMY DATA (Manual Input / Belum ada di Model AI) ---
+    # --- DUMMY DATA ---
     "Brown Spot": {
         "title": "Bercak Coklat (Brown Spot)",
-        "cause": "Jamur Helminthosporium oryzae. Bercak coklat lonjong seperti biji wijen.",
-        "prevention": ["Pemupukan Kalium (K) yang cukup", "Gunakan benih sehat"],
-        "treatment": ["Fungisida berbahan aktif Difenokonazol"],
+        "cause": "Jamur Helminthosporium oryzae. Bercak coklat lonjong.",
+        "prevention": ["Pemupukan Kalium (K)", "Benih sehat"],
+        "treatment": ["Fungisida Difenokonazol"],
         "color": "brown"
     },
     "Leaf Scald": {
         "title": "Hawar Daun (Leaf Scald)",
         "cause": "Jamur Microdochium oryzae. Pola zonasi pada ujung daun.",
-        "prevention": ["Hindari kepadatan tanam tinggi", "Sanitasi lahan"],
-        "treatment": ["Fungisida Benomyl atau Carbendazim"],
+        "prevention": ["Hindari kepadatan tanam tinggi"],
+        "treatment": ["Fungisida Benomyl"],
         "color": "orange"
     },
     "Narrow Brown Spot": {
-        "title": "Bercak Coklat Sempit (Narrow Brown Spot)",
-        "cause": "Jamur Cercospora janseana. Bercak coklat kemerahan sempit memanjang.",
-        "prevention": ["Gunakan varietas tahan", "Pemupukan KCL"],
+        "title": "Bercak Coklat Sempit",
+        "cause": "Jamur Cercospora janseana. Bercak coklat kemerahan sempit.",
+        "prevention": ["Gunakan varietas tahan"],
         "treatment": ["Fungisida Propikonazol"],
         "color": "brown"
     },
     "Neck Blast": {
         "title": "Busuk Leher (Neck Blast)",
-        "cause": "Fase lanjut dari Blas yang menyerang leher malai (patah leher).",
-        "prevention": ["Semprot fungisida saat bunting dan berbunga penuh"],
-        "treatment": ["Fungisida Isoprothiolane atau Tricyclazole"],
+        "cause": "Fase lanjut dari Blas yang menyerang leher malai.",
+        "prevention": ["Semprot fungisida saat bunting"],
+        "treatment": ["Fungisida Isoprothiolane"],
         "color": "red"
     },
     "Rice Hispa": {
         "title": "Hama Putih Palsu (Rice Hispa)",
-        "cause": "Kumbang Dicladispa armigera. Daun tampak putih transparan bergaris.",
-        "prevention": ["Pangkas daun yang bertelur", "Jebakan cahaya"],
+        "cause": "Kumbang Dicladispa armigera. Daun tampak putih transparan.",
+        "prevention": ["Pangkas daun bertelur"],
         "treatment": ["Insektisida Klorpirifos"],
         "color": "gray"
     },
     "Sheath Blight": {
-        "title": "Hawar Pelepah (Sheath Blight)",
-        "cause": "Jamur Rhizoctonia solani. Bercak pada pelepah dekat air.",
-        "prevention": ["Atur jarak tanam (legowo)", "Kurangi kelembaban"],
-        "treatment": ["Fungisida Validamycin atau Azoxystrobin"],
+        "title": "Hawar Pelepah",
+        "cause": "Jamur Rhizoctonia solani. Bercak pada pelepah.",
+        "prevention": ["Atur jarak tanam (legowo)"],
+        "treatment": ["Fungisida Validamycin"],
         "color": "orange"
     }
 }
@@ -144,25 +143,25 @@ def preprocess_image(image):
     if image.mode != "RGB":
         image = image.convert("RGB")
     image = image.resize((224, 224))
-    image = img_to_array(image)
-    image = np.expand_dims(image, axis=0)
-    return image / 255.0
+    # Menggunakan tf.keras.utils atau preprocessing
+    try:
+        x = utils.img_to_array(image)
+    except AttributeError:
+        x = preprocessing.image.img_to_array(image)
+        
+    x = np.expand_dims(x, axis=0)
+    return x / 255.0
 
 def predict_image(image):
-    # Jika model gagal load, kembalikan error
     if model is None:
-        return {"hasil": "Error", "confidence": 0, "detail": {"title": "Model Gagal Load", "cause": "Cek logs", "prevention": [], "treatment": [], "color": "black"}}
+        return {"hasil": "Error", "confidence": 0, "detail": DISEASE_KB["Sehat"]}
     
     img = preprocess_image(image)
     pred = model.predict(img)
     idx = np.argmax(pred[0])
     confidence = float(np.max(pred[0])) * 100
     
-    # Pastikan index sesuai dengan LABEL MODEL (Cuma 4)
-    if idx < len(MODEL_LABELS):
-        label = MODEL_LABELS[idx]
-    else:
-        label = MODEL_LABELS[0] # Fallback jika index aneh
+    label = MODEL_LABELS[idx] if idx < len(MODEL_LABELS) else MODEL_LABELS[0]
     
     return {
         "hasil": label,
@@ -171,28 +170,20 @@ def predict_image(image):
     }
 
 # ================== SESSION STATE ==================
-if "page" not in st.session_state:
-    st.session_state.page = "home"
-if "history" not in st.session_state:
-    st.session_state.history = []
-if "result" not in st.session_state:
-    st.session_state.result = None
+if "page" not in st.session_state: st.session_state.page = "home"
+if "history" not in st.session_state: st.session_state.history = []
+if "result" not in st.session_state: st.session_state.result = None
 
-# ================== SIDEBAR (DEBUG & SIMULASI) ==================
+# ================== SIDEBAR ==================
 with st.sidebar:
     st.header("🛠 Mode Developer")
-    st.info("Gunakan mode ini untuk melihat data penyakit yang belum disupport AI.")
-    
-    # Dropdown untuk memilih SEMUA penyakit (Termasuk Dummy)
+    st.info("Simulasi data untuk presentasi.")
     sim_disease = st.selectbox("Pilih Penyakit (Simulasi)", list(DISEASE_KB.keys()))
-    
     if st.button("Tampilkan Info Dummy"):
-        # Buat dummy result seolah-olah hasil scan
         dummy_result = {
             "hasil": sim_disease,
             "confidence": 100.0,
             "detail": DISEASE_KB[sim_disease],
-            # Pakai gambar placeholder atau null jika simulasi
             "image": Image.new('RGB', (200, 200), color=DISEASE_KB[sim_disease]['color'])
         }
         st.session_state.result = dummy_result
@@ -202,7 +193,6 @@ with st.sidebar:
 # ================== HALAMAN HOME ==================
 def home_page():
     st.markdown("## 🌾 Dashboard Kesehatan Tanaman")
-    
     col1, col2 = st.columns([3,1])
     with col2:
         if st.button("➕ Scan Baru", use_container_width=True):
@@ -228,13 +218,11 @@ def home_page():
 # ================== HALAMAN SCAN ==================
 def scan_page():
     st.markdown("## 📸 Scan Tanaman")
-    
     if model is None:
-        st.error("Model AI gagal dimuat. Cek logs di Streamlit Cloud.")
+        st.warning("⚠️ Model AI sedang bermasalah. Silakan gunakan 'Mode Developer' di sidebar.")
     
     col1, col2 = st.columns(2)
     image = None
-
     with col1:
         cam = st.camera_input("Ambil foto")
         if cam: image = Image.open(cam)
@@ -244,7 +232,6 @@ def scan_page():
 
     if image:
         st.image(image, caption="Preview", use_column_width=True)
-        # Tombol disable jika model error
         if st.button("🔍 Analisis AI", use_container_width=True, disabled=(model is None)):
             with st.spinner("Menganalisis..."):
                 result = predict_image(image)
@@ -265,27 +252,19 @@ def result_page():
 
     r = st.session_state.result
     info = r["detail"]
-
     st.image(r["image"], use_column_width=True)
-    
-    # Warna badge berdasarkan confidence/tipe
     st.markdown(f"## {info['title']}")
     st.caption(f"Hasil Analisis: {r['hasil']} | Kepercayaan: {r['confidence']}%")
-    
     st.info(f"**Penyebab:** {info['cause']}")
 
     col1, col2 = st.columns(2)
     with col1:
         st.markdown("### 🛡 Pencegahan")
-        for p in info["prevention"]:
-            st.write(f"✅ {p}")
-
+        for p in info["prevention"]: st.write(f"✅ {p}")
     with col2:
         st.markdown("### 💊 Pengobatan")
-        for t in info["treatment"]:
-            st.write(f"💊 {t}")
+        for t in info["treatment"]: st.write(f"💊 {t}")
 
-    # Tombol simpan
     if st.button("💾 Simpan ke Riwayat", use_container_width=True):
         st.session_state.history.insert(0, {
             "title": info["title"],
@@ -301,9 +280,6 @@ def result_page():
         st.rerun()
 
 # ================== ROUTING ==================
-if st.session_state.page == "home":
-    home_page()
-elif st.session_state.page == "scan":
-    scan_page()
-elif st.session_state.page == "result":
-    result_page()
+if st.session_state.page == "home": home_page()
+elif st.session_state.page == "scan": scan_page()
+elif st.session_state.page == "result": result_page()
