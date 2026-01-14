@@ -12,15 +12,19 @@ from PIL import Image
 from datetime import datetime
 import tensorflow as tf
 
-# Try-Except block untuk menangani perbedaan versi library saat loading
+# --- BAGIAN INI DIPERBAIKI (SIMPLIFIED IMPORTS) ---
+# Kita gunakan jalur import standar untuk TF 2.15.0
 try:
     from tensorflow.keras.models import load_model
     from tensorflow.keras.layers import InputLayer
-    from tensorflow.keras.preprocessing.image import img_to_array
-except ImportError:
-    from tensorflow.python.keras.models import load_model
-    from tensorflow.python.keras.layers import InputLayer
-    from tensorflow.python.keras.preprocessing.image import img_to_array
+    # Coba import img_to_array dari utils (lokasi baru) atau preprocessing (lokasi lama)
+    try:
+        from tensorflow.keras.utils import img_to_array
+    except ImportError:
+        from tensorflow.keras.preprocessing.image import img_to_array
+except ImportError as e:
+    st.error(f"Error Import TensorFlow: {e}")
+    st.stop()
 
 # ================== KONFIGURASI HALAMAN ==================
 st.set_page_config(
@@ -30,7 +34,7 @@ st.set_page_config(
 )
 
 # ================== PERBAIKAN KOMPATIBILITAS MODEL (ANTI-ERROR) ==================
-# Class ini dimodifikasi untuk membuang SEMUA argumen config yang tidak dikenali Keras baru
+# Class ini dimodifikasi untuk membuang SEMUA argumen config yang tidak dikenali
 class FixedInputLayer(InputLayer):
     def __init__(self, *args, **kwargs):
         # Daftar argumen yang sering bikin error di TensorFlow versi baru
@@ -45,11 +49,10 @@ class FixedInputLayer(InputLayer):
 def load_ai_model():
     with st.spinner("⏳ Memuat model AI, mohon tunggu..."):
         try:
-            # Cara 1: Standard load dengan fix layer
+            # Load model dengan custom object FixedInputLayer
             return load_model("best_model.h5", compile=False, custom_objects={'InputLayer': FixedInputLayer})
         except Exception as e:
-            st.error(f"Gagal memuat model: {e}")
-            st.warning("Tips: Pastikan requirements.txt menggunakan 'tensorflow==2.15.0'")
+            st.error(f"Gagal memuat model. Pastikan requirements.txt berisi 'tensorflow==2.15.0'. Error: {e}")
             return None
 
 model = load_ai_model()
@@ -156,12 +159,15 @@ def predict_image(image):
     confidence = float(np.max(pred[0])) * 100
     
     # Pastikan index sesuai dengan LABEL MODEL (Cuma 4)
-    label = MODEL_LABELS[idx]
+    if idx < len(MODEL_LABELS):
+        label = MODEL_LABELS[idx]
+    else:
+        label = MODEL_LABELS[0] # Fallback jika index aneh
     
     return {
         "hasil": label,
         "confidence": round(confidence, 1),
-        "detail": DISEASE_KB[label]
+        "detail": DISEASE_KB.get(label, DISEASE_KB["Sehat"])
     }
 
 # ================== SESSION STATE ==================
@@ -224,7 +230,7 @@ def scan_page():
     st.markdown("## 📸 Scan Tanaman")
     
     if model is None:
-        st.error("Model AI gagal dimuat. Harap perbaiki requirements.txt ke 'tensorflow==2.15.0'")
+        st.error("Model AI gagal dimuat. Cek logs di Streamlit Cloud.")
     
     col1, col2 = st.columns(2)
     image = None
