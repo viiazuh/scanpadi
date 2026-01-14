@@ -1,6 +1,6 @@
-
 import os
 # ================== KONFIGURASI TENSORFLOW ==================
+# Memaksa menggunakan implementasi Keras legacy untuk kompatibilitas
 os.environ["TF_USE_LEGACY_KERAS"] = "1"
 os.environ["TF_ENABLE_ONEDNN_OPTS"] = "0"
 os.environ["TF_CPP_MIN_LOG_LEVEL"] = "2"
@@ -11,9 +11,16 @@ import numpy as np
 from PIL import Image
 from datetime import datetime
 import tensorflow as tf
-from tensorflow.keras.models import load_model
-from tensorflow.keras.layers import InputLayer # Import InputLayer untuk perbaikan
-from tensorflow.keras.preprocessing.image import img_to_array
+
+# Try-Except block untuk menangani perbedaan versi library saat loading
+try:
+    from tensorflow.keras.models import load_model
+    from tensorflow.keras.layers import InputLayer
+    from tensorflow.keras.preprocessing.image import img_to_array
+except ImportError:
+    from tensorflow.python.keras.models import load_model
+    from tensorflow.python.keras.layers import InputLayer
+    from tensorflow.python.keras.preprocessing.image import img_to_array
 
 # ================== KONFIGURASI HALAMAN ==================
 st.set_page_config(
@@ -22,87 +29,114 @@ st.set_page_config(
     initial_sidebar_state="collapsed"
 )
 
-# ================== PERBAIKAN KOMPATIBILITAS MODEL ==================
-# Class ini berguna untuk menangani error 'batch_shape' akibat beda versi TF
+# ================== PERBAIKAN KOMPATIBILITAS MODEL (ANTI-ERROR) ==================
+# Class ini dimodifikasi untuk membuang SEMUA argumen config yang tidak dikenali Keras baru
 class FixedInputLayer(InputLayer):
     def __init__(self, *args, **kwargs):
-        if "batch_shape" in kwargs:
-            kwargs.pop("batch_shape")
+        # Daftar argumen yang sering bikin error di TensorFlow versi baru
+        ignore_keys = ['batch_shape', 'batch_input_shape', 'sparse', 'ragged', 'dtype']
+        for k in ignore_keys:
+            if k in kwargs:
+                kwargs.pop(k)
         super().__init__(*args, **kwargs)
 
 # ================== LOAD MODEL (CACHE) ==================
 @st.cache_resource
 def load_ai_model():
     with st.spinner("⏳ Memuat model AI, mohon tunggu..."):
-        # Menggunakan custom_objects untuk memanggil FixedInputLayer
-        return load_model("best_model.h5", compile=False, custom_objects={'InputLayer': FixedInputLayer})
+        try:
+            # Cara 1: Standard load dengan fix layer
+            return load_model("best_model.h5", compile=False, custom_objects={'InputLayer': FixedInputLayer})
+        except Exception as e:
+            st.error(f"Gagal memuat model: {e}")
+            st.warning("Tips: Pastikan requirements.txt menggunakan 'tensorflow==2.15.0'")
+            return None
 
 model = load_ai_model()
 
-LABELS = ["Blas", "Hawar Daun", "Tungro", "Sehat"]
+# ================== DATABASE LABELS & PENYAKIT ==================
 
-# ================== DATABASE PENYAKIT ==================
+# LABEL ASLI MODEL (Hanya 4 ini yang bisa diprediksi AI saat ini)
+MODEL_LABELS = ["Blas", "Hawar Daun", "Tungro", "Sehat"]
+
+# DATABASE LENGKAP (Termasuk Dummy Data untuk penyakit yang belum didukung AI)
 DISEASE_KB = {
+    # --- DETEKSI AI AKTIF ---
     "Blas": {
-        "title": "Penyakit Blas (Rice Blast)",
-        "cause": "Disebabkan oleh jamur Pyricularia oryzae.",
-        "prevention": [
-            "Gunakan varietas tahan blas",
-            "Hindari pupuk nitrogen berlebihan",
-            "Jaga jarak tanam",
-            "Bersihkan gulma sekitar sawah"
-        ],
-        "treatment": [
-            "Gunakan fungisida Tricyclazole",
-            "Bakar jerami terinfeksi",
-            "Rotasi varietas"
-        ],
+        "title": "Penyakit Blas (Leaf Blast)",
+        "cause": "Jamur Pyricularia oryzae. Bercak berbentuk belah ketupat.",
+        "prevention": ["Gunakan varietas tahan", "Hindari pupuk N berlebih", "Jaga jarak tanam"],
+        "treatment": ["Fungisida Tricyclazole", "Bakar jerami sisa"],
         "color": "red"
     },
     "Hawar Daun": {
-        "title": "Hawar Daun Bakteri (Kresek)",
-        "cause": "Disebabkan oleh bakteri Xanthomonas oryzae.",
-        "prevention": [
-            "Atur pengairan",
-            "Kurangi pupuk urea",
-            "Gunakan bibit sehat"
-        ],
-        "treatment": [
-            "Gunakan bakterisida berbahan tembaga",
-            "Keringkan sawah berkala"
-        ],
+        "title": "Hawar Daun Bakteri (Bacterial Leaf Blight)",
+        "cause": "Bakteri Xanthomonas oryzae. Daun mengering dari ujung (kresek).",
+        "prevention": ["Atur pengairan (jangan tergenang terus)", "Kurangi Urea"],
+        "treatment": ["Bakterisida tembaga", "Keringkan sawah berkala"],
         "color": "orange"
     },
     "Tungro": {
         "title": "Penyakit Tungro",
-        "cause": "Virus yang ditularkan wereng hijau.",
-        "prevention": [
-            "Tanam serempak",
-            "Kendalikan wereng",
-            "Gunakan varietas tahan"
-        ],
-        "treatment": [
-            "Cabut tanaman sakit",
-            "Gunakan insektisida sistemik"
-        ],
+        "cause": "Virus dari wereng hijau. Tanaman kerdil dan daun kuning-oranye.",
+        "prevention": ["Tanam serempak", "Kendalikan wereng hijau"],
+        "treatment": ["Cabut tanaman sakit (eradikasi)", "Insektisida sistemik"],
         "color": "red"
     },
     "Sehat": {
-        "title": "Tanaman Padi Sehat",
-        "cause": "Tanaman tumbuh optimal tanpa gejala penyakit.",
-        "prevention": [
-            "Pemupukan berimbang",
-            "Pantau OPT rutin"
-        ],
-        "treatment": [
-            "Tidak perlu pengobatan",
-            "Lanjutkan perawatan rutin"
-        ],
+        "title": "Tanaman Sehat (Healthy)",
+        "cause": "Kondisi optimal, tidak ada serangan OPT.",
+        "prevention": ["Lanjutkan pemupukan berimbang", "Monitoring rutin"],
+        "treatment": ["Tidak perlu tindakan"],
         "color": "green"
+    },
+
+    # --- DUMMY DATA (Manual Input / Belum ada di Model AI) ---
+    "Brown Spot": {
+        "title": "Bercak Coklat (Brown Spot)",
+        "cause": "Jamur Helminthosporium oryzae. Bercak coklat lonjong seperti biji wijen.",
+        "prevention": ["Pemupukan Kalium (K) yang cukup", "Gunakan benih sehat"],
+        "treatment": ["Fungisida berbahan aktif Difenokonazol"],
+        "color": "brown"
+    },
+    "Leaf Scald": {
+        "title": "Hawar Daun (Leaf Scald)",
+        "cause": "Jamur Microdochium oryzae. Pola zonasi pada ujung daun.",
+        "prevention": ["Hindari kepadatan tanam tinggi", "Sanitasi lahan"],
+        "treatment": ["Fungisida Benomyl atau Carbendazim"],
+        "color": "orange"
+    },
+    "Narrow Brown Spot": {
+        "title": "Bercak Coklat Sempit (Narrow Brown Spot)",
+        "cause": "Jamur Cercospora janseana. Bercak coklat kemerahan sempit memanjang.",
+        "prevention": ["Gunakan varietas tahan", "Pemupukan KCL"],
+        "treatment": ["Fungisida Propikonazol"],
+        "color": "brown"
+    },
+    "Neck Blast": {
+        "title": "Busuk Leher (Neck Blast)",
+        "cause": "Fase lanjut dari Blas yang menyerang leher malai (patah leher).",
+        "prevention": ["Semprot fungisida saat bunting dan berbunga penuh"],
+        "treatment": ["Fungisida Isoprothiolane atau Tricyclazole"],
+        "color": "red"
+    },
+    "Rice Hispa": {
+        "title": "Hama Putih Palsu (Rice Hispa)",
+        "cause": "Kumbang Dicladispa armigera. Daun tampak putih transparan bergaris.",
+        "prevention": ["Pangkas daun yang bertelur", "Jebakan cahaya"],
+        "treatment": ["Insektisida Klorpirifos"],
+        "color": "gray"
+    },
+    "Sheath Blight": {
+        "title": "Hawar Pelepah (Sheath Blight)",
+        "cause": "Jamur Rhizoctonia solani. Bercak pada pelepah dekat air.",
+        "prevention": ["Atur jarak tanam (legowo)", "Kurangi kelembaban"],
+        "treatment": ["Fungisida Validamycin atau Azoxystrobin"],
+        "color": "orange"
     }
 }
 
-# ================== PREPROCESS & PREDICT ==================
+# ================== FUNGSI UTAMA ==================
 def preprocess_image(image):
     if image.mode != "RGB":
         image = image.convert("RGB")
@@ -112,12 +146,18 @@ def preprocess_image(image):
     return image / 255.0
 
 def predict_image(image):
+    # Jika model gagal load, kembalikan error
+    if model is None:
+        return {"hasil": "Error", "confidence": 0, "detail": {"title": "Model Gagal Load", "cause": "Cek logs", "prevention": [], "treatment": [], "color": "black"}}
+    
     img = preprocess_image(image)
     pred = model.predict(img)
     idx = np.argmax(pred[0])
     confidence = float(np.max(pred[0])) * 100
-    label = LABELS[idx]
-
+    
+    # Pastikan index sesuai dengan LABEL MODEL (Cuma 4)
+    label = MODEL_LABELS[idx]
+    
     return {
         "hasil": label,
         "confidence": round(confidence, 1),
@@ -127,17 +167,36 @@ def predict_image(image):
 # ================== SESSION STATE ==================
 if "page" not in st.session_state:
     st.session_state.page = "home"
-
 if "history" not in st.session_state:
     st.session_state.history = []
-
 if "result" not in st.session_state:
     st.session_state.result = None
+
+# ================== SIDEBAR (DEBUG & SIMULASI) ==================
+with st.sidebar:
+    st.header("🛠 Mode Developer")
+    st.info("Gunakan mode ini untuk melihat data penyakit yang belum disupport AI.")
+    
+    # Dropdown untuk memilih SEMUA penyakit (Termasuk Dummy)
+    sim_disease = st.selectbox("Pilih Penyakit (Simulasi)", list(DISEASE_KB.keys()))
+    
+    if st.button("Tampilkan Info Dummy"):
+        # Buat dummy result seolah-olah hasil scan
+        dummy_result = {
+            "hasil": sim_disease,
+            "confidence": 100.0,
+            "detail": DISEASE_KB[sim_disease],
+            # Pakai gambar placeholder atau null jika simulasi
+            "image": Image.new('RGB', (200, 200), color=DISEASE_KB[sim_disease]['color'])
+        }
+        st.session_state.result = dummy_result
+        st.session_state.page = "result"
+        st.rerun()
 
 # ================== HALAMAN HOME ==================
 def home_page():
     st.markdown("## 🌾 Dashboard Kesehatan Tanaman")
-
+    
     col1, col2 = st.columns([3,1])
     with col2:
         if st.button("➕ Scan Baru", use_container_width=True):
@@ -150,7 +209,6 @@ def home_page():
             with st.container():
                 c1, c2 = st.columns([1,3])
                 with c1:
-                    # PERBAIKAN: Menggunakan use_column_width untuk kompatibilitas
                     st.image(h["image"], use_column_width=True)
                 with c2:
                     st.markdown(f"**{h['title']}**")
@@ -164,55 +222,64 @@ def home_page():
 # ================== HALAMAN SCAN ==================
 def scan_page():
     st.markdown("## 📸 Scan Tanaman")
-
+    
+    if model is None:
+        st.error("Model AI gagal dimuat. Harap perbaiki requirements.txt ke 'tensorflow==2.15.0'")
+    
     col1, col2 = st.columns(2)
     image = None
 
     with col1:
-        cam = st.camera_input("Ambil foto dari kamera")
-        if cam:
-            image = Image.open(cam)
-
+        cam = st.camera_input("Ambil foto")
+        if cam: image = Image.open(cam)
     with col2:
-        file = st.file_uploader("Atau upload gambar", type=["jpg","jpeg","png"])
-        if file:
-            image = Image.open(file)
+        file = st.file_uploader("Upload gambar", type=["jpg","png","jpeg"])
+        if file: image = Image.open(file)
 
     if image:
-        # PERBAIKAN: Menggunakan use_column_width untuk kompatibilitas
         st.image(image, caption="Preview", use_column_width=True)
-        if st.button("🔍 Analisis", use_container_width=True):
-            with st.spinner("Menganalisis gambar..."):
+        # Tombol disable jika model error
+        if st.button("🔍 Analisis AI", use_container_width=True, disabled=(model is None)):
+            with st.spinner("Menganalisis..."):
                 result = predict_image(image)
                 result["image"] = image
                 st.session_state.result = result
                 st.session_state.page = "result"
+                st.rerun()
 
     if st.button("⬅ Kembali"):
         st.session_state.page = "home"
 
 # ================== HALAMAN RESULT ==================
 def result_page():
+    if st.session_state.result is None:
+        st.session_state.page = "home"
+        st.rerun()
+        return
+
     r = st.session_state.result
     info = r["detail"]
 
-    # PERBAIKAN: Menggunakan use_column_width untuk kompatibilitas
     st.image(r["image"], use_column_width=True)
+    
+    # Warna badge berdasarkan confidence/tipe
     st.markdown(f"## {info['title']}")
-    st.success(f"Akurasi: {r['confidence']}%")
-    st.write(info["cause"])
+    st.caption(f"Hasil Analisis: {r['hasil']} | Kepercayaan: {r['confidence']}%")
+    
+    st.info(f"**Penyebab:** {info['cause']}")
 
     col1, col2 = st.columns(2)
     with col1:
-        st.markdown("### Pencegahan")
+        st.markdown("### 🛡 Pencegahan")
         for p in info["prevention"]:
-            st.write("•", p)
+            st.write(f"✅ {p}")
 
     with col2:
-        st.markdown("### Pengobatan")
+        st.markdown("### 💊 Pengobatan")
         for t in info["treatment"]:
-            st.write("•", t)
+            st.write(f"💊 {t}")
 
+    # Tombol simpan
     if st.button("💾 Simpan ke Riwayat", use_container_width=True):
         st.session_state.history.insert(0, {
             "title": info["title"],
@@ -221,11 +288,13 @@ def result_page():
             "date": datetime.now().strftime("%d %B %Y %H:%M")
         })
         st.session_state.page = "home"
+        st.rerun()
 
     if st.button("🔄 Scan Lagi"):
         st.session_state.page = "scan"
+        st.rerun()
 
-# ================== ROUTER ==================
+# ================== ROUTING ==================
 if st.session_state.page == "home":
     home_page()
 elif st.session_state.page == "scan":
