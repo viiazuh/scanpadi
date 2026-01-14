@@ -1,3 +1,4 @@
+
 import os
 # ================== KONFIGURASI TENSORFLOW ==================
 os.environ["TF_USE_LEGACY_KERAS"] = "1"
@@ -11,6 +12,7 @@ from PIL import Image
 from datetime import datetime
 import tensorflow as tf
 from tensorflow.keras.models import load_model
+from tensorflow.keras.layers import InputLayer # Import InputLayer untuk perbaikan
 from tensorflow.keras.preprocessing.image import img_to_array
 
 # ================== KONFIGURASI HALAMAN ==================
@@ -20,14 +22,22 @@ st.set_page_config(
     initial_sidebar_state="collapsed"
 )
 
+# ================== PERBAIKAN KOMPATIBILITAS MODEL ==================
+# Class ini berguna untuk menangani error 'batch_shape' akibat beda versi TF
+class FixedInputLayer(InputLayer):
+    def __init__(self, *args, **kwargs):
+        if "batch_shape" in kwargs:
+            kwargs.pop("batch_shape")
+        super().__init__(*args, **kwargs)
+
 # ================== LOAD MODEL (CACHE) ==================
 @st.cache_resource
 def load_ai_model():
     with st.spinner("⏳ Memuat model AI, mohon tunggu..."):
-        return load_model("best_model.h5", compile=False)
+        # Menggunakan custom_objects untuk memanggil FixedInputLayer
+        return load_model("best_model.h5", compile=False, custom_objects={'InputLayer': FixedInputLayer})
 
 model = load_ai_model()
-
 
 LABELS = ["Blas", "Hawar Daun", "Tungro", "Sehat"]
 
@@ -140,7 +150,8 @@ def home_page():
             with st.container():
                 c1, c2 = st.columns([1,3])
                 with c1:
-                    st.image(h["image"], use_container_width=True)
+                    # PERBAIKAN: Menggunakan use_column_width untuk kompatibilitas
+                    st.image(h["image"], use_column_width=True)
                 with c2:
                     st.markdown(f"**{h['title']}**")
                     st.write(f"Akurasi: {h['confidence']}%")
@@ -168,7 +179,8 @@ def scan_page():
             image = Image.open(file)
 
     if image:
-        st.image(image, caption="Preview", use_container_width=True)
+        # PERBAIKAN: Menggunakan use_column_width untuk kompatibilitas
+        st.image(image, caption="Preview", use_column_width=True)
         if st.button("🔍 Analisis", use_container_width=True):
             with st.spinner("Menganalisis gambar..."):
                 result = predict_image(image)
@@ -184,7 +196,8 @@ def result_page():
     r = st.session_state.result
     info = r["detail"]
 
-    st.image(r["image"], use_container_width=True)
+    # PERBAIKAN: Menggunakan use_column_width untuk kompatibilitas
+    st.image(r["image"], use_column_width=True)
     st.markdown(f"## {info['title']}")
     st.success(f"Akurasi: {r['confidence']}%")
     st.write(info["cause"])
